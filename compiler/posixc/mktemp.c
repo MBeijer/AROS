@@ -1,9 +1,10 @@
 /*
-    Copyright © 1995-2007, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 */
 
-#include <string.h>
+#include <aros/debug.h>
+
 #include <proto/exec.h>
 #include <proto/dos.h>
 #include <dos/dos.h>
@@ -11,8 +12,7 @@
 #include <exec/types.h>
 #include <assert.h>
 
-#define DEBUG 0
-#include <aros/debug.h>
+#include <string.h>
 
 /*****************************************************************************
 
@@ -49,7 +49,7 @@
     BUGS
     	Cannot create more than 26 filenames for the same process id. This is because
     	the "bumping" is only done to the first tail character - it should be
-    	generalised to bump more characters if necessary.
+    	generalized to bump more characters if necessary.
 
     SEE ALSO
 
@@ -73,7 +73,7 @@
     
     c++; /* ... c now points to the 1st char of the template tail */
 
-    /* If template errornously does not end in X c will point to '\0';
+    /* If template erroneously does not end in X c will point to '\0';
        exit gracefully
     */
     if (*c)

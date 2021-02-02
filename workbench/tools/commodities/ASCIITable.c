@@ -73,7 +73,7 @@
 #include "strings.h"
 
 #define CATALOG_NAME     "System/Tools/Commodities.catalog"
-#define CATALOG_VERSION  3
+#include "catalogs/catalog_version.h"
 
 TEXT version[] = "$VER: ASCIITable 1.2 (14.01.2012)";
 
@@ -599,7 +599,7 @@ static void MakeGUI(void)
     app = (Object *)ApplicationObject,
         MUIA_Application_Title, __(MSG_ASCIITABLE_CXNAME),
         MUIA_Application_Version, (IPTR)version,
-        MUIA_Application_Copyright, (IPTR)"Copyright  © 2012, The AROS Development TEAM",
+        MUIA_Application_Copyright, (IPTR)"Copyright  \xA9 2012, The AROS Development TEAM",
         MUIA_Application_Author, (IPTR)"The AROS Development Team",
         MUIA_Application_Description, __(MSG_ASCIITABLE_CXDESCR),
         MUIA_Application_BrokerPri, cx_pri,

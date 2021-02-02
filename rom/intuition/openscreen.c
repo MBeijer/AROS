@@ -1,6 +1,6 @@
 /*
-    Copyright ï¿½ 1995-2020, The AROS Development Team. All rights reserved.
-    Copyright ï¿½ 2001-2013, The MorphOS Development Team. All Rights Reserved.
+    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
+    Copyright © 2001-2013, The MorphOS Development Team. All Rights Reserved.
     $Id$
 
     Open a new screen.
@@ -46,6 +46,9 @@
 #else
 #include <hidd/gfx.h>
 #endif
+
+#include <string.h>
+
 #include "intuition_intern.h"
 #include "intuition_customize.h"
 #include "intuition_extend.h"

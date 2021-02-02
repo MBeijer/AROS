@@ -3,7 +3,7 @@
     $Id$
 */
 
-#define DEBUG 0
+//#define DEBUG 1
 #include <aros/debug.h>
 
 #define USE_BOOPSI_STUBS
@@ -21,6 +21,8 @@
 #include <datatypes/datatypesclass.h>
 #include "datatypes_intern.h"
 #include <clib/boopsistubs.h>
+
+#include <string.h>
 
 /************************** ASCII/BINARY RECOGNITION *************************/
 
@@ -237,7 +239,7 @@ struct CompoundDataType *ExamineLock(BPTR lock, struct FileInfoBlock *fib, struc
                         if((CheckArray = AllocVec((ULONG)(CheckSize)+1,
                                                   MEMF_CLEAR)))
                         {
-                            D(bug("datatypes.library/ExamineLock: Alloced CheckArray\n"));
+                            D(bug("datatypes.library/ExamineLock: Allocated CheckArray\n"));
                             
                             if((CheckSize = Read(file, CheckArray, 
                                                  (ULONG)CheckSize)) > 0)
@@ -332,13 +334,14 @@ struct CompoundDataType *FindDtInList(struct Library *DataTypesBase,
                 cur->DT.dtn_Node1.ln_Succ;
                 cur = (struct CompoundDataType *)cur->DT.dtn_Node1.ln_Succ)
         {
-            if (!(cur->DTH.dth_MaskLen) && (cur->Function))
+            
+            if (!found && !(cur->DTH.dth_MaskLen) && (cur->Function))
             {
                 D(bug("[FindDtInList] *** Calling %s Match Function @ 0x%p\n", cur->DT.dtn_Node1.ln_Name, cur->Function));
                 found = (cur->Function)(dthc);
             }
 
-            if (!found && cur->DTH.dth_MaskLen && CheckSize >= cur->DTH.dth_MaskLen)
+            if (!found && CheckSize >= cur->DTH.dth_MaskLen)
             {
                 WORD *msk = cur->DTH.dth_Mask;
                 UBYTE *cmp = CheckArray;

@@ -2,11 +2,8 @@
     Copyright © 1995-2012, The AROS Development Team. All rights reserved.
     $Id$
 */
-#include "portable_macros.h"
-
-#ifdef __AROS__
 #include <aros/symbolsets.h>
-#endif
+
 #include <exec/types.h>
 #include <proto/locale.h>
 
@@ -14,7 +11,7 @@
 #include "strings.h"
 
 #define CATALOG_NAME     "System/System/Wanderer.catalog"
-#define CATALOG_VERSION  3
+#include "Catalogs/catalog_version.h"
 
 /*** Variables **************************************************************/
 struct Catalog *catalog;
@@ -26,11 +23,11 @@ CONST_STRPTR _(ULONG id)
 {
     if (LocaleBase != NULL && catalog != NULL)
     {
-  return GetCatalogStr(catalog, id, CatCompArray[id].cca_Str);
+        return GetCatalogStr(catalog, id, CatCompArray[id].cca_Str);
     } 
     else 
     {
-  return CatCompArray[id].cca_Str;
+        return CatCompArray[id].cca_Str;
     }
 }
 

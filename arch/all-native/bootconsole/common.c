@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2011, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc: Common console output functions.
@@ -13,10 +13,12 @@
 
 #include "console.h"
 
+#define BC_DEBUGENABLE  (1 << 0)
+#define BC_DEBUGSERIAL  (1 << 1)
+
 /* Screen type */
 __attribute__((section(".data"))) unsigned char scr_Type = SCR_UNKNOWN;
-
-__attribute__((section(".data"))) static unsigned char use_serial = 0;
+__attribute__((section(".data"))) static unsigned char bcdebugflags = 0;
 
 void con_InitVESA(unsigned short version, struct vbe_mode *mode)
 {
@@ -72,38 +74,63 @@ void con_InitVGA(void)
 
 void con_InitSerial(char *cmdline)
 {
-    char *opts = strstr(cmdline, "debug=serial");
+    char *opts = strstr(cmdline, " debug");
     
     if (opts)
     {
-        use_serial = 1;
-        
-        serial_Init(&opts[12]);
+        bcdebugflags |= BC_DEBUGENABLE;
+        if (opts[6] == '=')
+        {
+            if (strstr(&opts[7], "serial"))
+            {
+                bcdebugflags |= BC_DEBUGSERIAL;
+                serial_Init(&opts[13]);
+            }
+        }
     }
     else
-        use_serial = 0;
+    {
+        bcdebugflags &= ~(BC_DEBUGENABLE|BC_DEBUGSERIAL);
+    }
 }
 
 void con_Putc(char c)
 {
-    /* 0x03 character shuts off boot-time screen console */
-    if (c == 0x03)
+    if (bcdebugflags & BC_DEBUGENABLE)
     {
-        scr_Type = SCR_UNKNOWN;
-        return;
+        /* 0x03 character shuts off boot-time screen console */
+        if (c == 0x03)
+        {
+            scr_Type = SCR_UNKNOWN;
+            return;
+        }
+
+        if (bcdebugflags & BC_DEBUGSERIAL)
+            serial_Putc(c);
+
+        switch (scr_Type)
+        {
+        case SCR_TEXT:
+            txt_Putc(c);
+            break;
+
+        case SCR_GFX:
+            fb_Putc(c);
+            break;
+        }
     }
+}
 
-    if (use_serial)
-        serial_Putc(c);
+int con_CanGetc(void)
+{
+    if (bcdebugflags & BC_DEBUGSERIAL)
+        return serial_CanGetc();
+    return 0;
+}
 
-    switch (scr_Type)
-    {
-    case SCR_TEXT:
-        txt_Putc(c);
-        break;
-
-    case SCR_GFX:
-        fb_Putc(c);
-        break;
-    }
+int con_Getc(void)
+{
+    if (bcdebugflags & BC_DEBUGSERIAL)
+        return serial_Getc();
+    return -1;
 }

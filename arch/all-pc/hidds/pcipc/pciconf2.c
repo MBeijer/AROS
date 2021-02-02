@@ -1,5 +1,5 @@
 /*
-    Copyright © 2004-2018, The AROS Development Team. All rights reserved.
+    Copyright © 2004-2020, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc: PCI configuration mechanism 2 access functions
@@ -9,8 +9,9 @@
 #include <aros/debug.h>
 #include <asm/io.h>
 #include <proto/exec.h>
+#include <hardware/pci.h>
 
-#include "pci.h"
+#include "pcipc.h"
 
 #ifdef LEGACY_SUPPORT
 

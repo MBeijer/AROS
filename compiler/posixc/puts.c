@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2013, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     C99 function puts().
@@ -12,13 +12,13 @@
     NAME */
 #include <stdio.h>
 
-	int puts (
+	int __posixc_puts (
 
 /*  SYNOPSIS */
 	const char * str)
 
 /*  FUNCTION
-	Print a string to stdout. A newline ('\n') is emmitted after the
+	Print a string to stdout. A newline ('\n') is emitted after the
 	string.
 
     INPUTS

@@ -89,7 +89,7 @@ arosbootstrap_init:
 	swap	%d6
 
 	move.l	%a5,%a4	/* Space for CPU/FPU data array */
-	lea	16(%a5),%a5	/* Space also reserved for extra membank */
+	lea		16(%a5),%a5	/* Space also reserved for extra membank */
 	move.l	%a4,%a0
 	jsr	_cpu_detect
 	/* High word = gayle flag, low word = AttnFlags */

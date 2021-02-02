@@ -19,6 +19,7 @@ ifeq ($(ARCH),pc)
 USER_CPPFLAGS := -DHAVE_ACPICA=1
 USER_LDFLAGS += -lacpica
 endif
+#USER_CPPFLAGS += -DDEBUG=1
 
 %build_module mmake=kernel-usb-pciusb \
     modname=pciusb modtype=device \

@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2013, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     C99 function fflush().
@@ -21,14 +21,14 @@
     NAME */
 #include <stdio.h>
 
-	int fflush (
+	int __posixc_fflush (
 
 /*  SYNOPSIS */
 	FILE * stream)
 
 /*  FUNCTION
 	Flush a stream. If the stream is an input stream, then the stream
-	is synchronised for unbuffered I/O. If the stream is an output
+	is synchronized for unbuffered I/O. If the stream is an output
 	stream, then any buffered data is written.
 
     INPUTS

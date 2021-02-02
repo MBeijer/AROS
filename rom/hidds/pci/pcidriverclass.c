@@ -1,5 +1,5 @@
 /*
-    Copyright © 2004-2016, The AROS Development Team. All rights reserved.
+    Copyright © 2004-2020, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc: Base PCI driver class
@@ -59,20 +59,6 @@ void PCIDrv__Hidd_PCIDriver__WriteConfigLong(OOP_Class *cl, OOP_Object *o,
 {
     /* Wheeeee! Someone has forgotten to reimplement WriteConfigLong! */
     bug("[PCIDriver] Alert! PCIDriver::WriteConfigLong() unimplemented!\n");
-}
-
-/*
-    IPTR PCIDriver::HasExtendedConfiguration(bus, dev, sub)
-
-    This does not need to be implemented in the driver; in that case
-    ECAM access method is not used and extended configuration is unavailable.
-*/
-IPTR PCIDrv__Hidd_PCIDriver__HasExtendedConfig(OOP_Class *cl, OOP_Object *o,
-    struct pHidd_PCIDriver_HasExtendedConfig *msg)
-{
-    /* Wheeeee! Someone has forgotten to reimplement HasExtendedConfig! */
-    bug("[PCIDriver] Alert! PCIDriver::HasExtendedConfig() unimplemented!\n");
-    return (IPTR)NULL;
 }
 
 /*
@@ -356,6 +342,12 @@ VOID PCIDrv__Root__Get(OOP_Class *cl, OOP_Object *o,
     {
         switch(idx)
         {
+            case aoHidd_PCIDriver_DeviceClass:
+                /* report the default class if drivers do not provide their own .. */
+                D(bug("[PCI:Driver] %s: Using default device class @ 0x%p\n", __func__, PSD(cl)->pciDeviceClass);)
+                *msg->storage = (IPTR)PSD(cl)->pciDeviceClass;
+                break;
+
             case aoHidd_PCIDriver_DirectBus:
                 *msg->storage = (IPTR)instance->DirectBus;
                 break;

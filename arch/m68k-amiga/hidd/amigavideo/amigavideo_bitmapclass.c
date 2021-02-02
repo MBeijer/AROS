@@ -423,7 +423,7 @@ VOID AmigaVideoBM__Hidd_BitMap__PutPixel(OOP_Class *cl, OOP_Object *o,
         data->pixelcacheoffset = offset & ~3;
     }
     bit = (offset - data->pixelcacheoffset) * 8 + (msg->x & 7);
-    data->pixelcache[bit] = ~msg->pixel;
+    data->pixelcache[bit] = msg->pixel;
     data->writemask |= 1 << bit;
 
     CMDDEBUGPIXEL(bug("[AmigaVideo:Bitmap] %s: %dx%d %x\n", __func__, msg->x, msg->y, msg->pixel);)

@@ -147,7 +147,7 @@ static int ahci_RegisterPort(struct ahci_port *ap)
     struct AHCIBase *AHCIBase = ap->ap_sc->sc_dev->dev_AHCIBase;
     struct cam_sim *unit;
     char name[64];
-        D(bug("[AHCI] %s()\n", __PRETTY_FUNCTION__)); 
+        D(bug("[AHCI] %s()\n", __func__)); 
 
     unit = AllocPooled(AHCIBase->ahci_MemPool, sizeof(*unit));
     if (!unit)
@@ -223,13 +223,13 @@ static BOOL ahci_RegisterVolume(struct ahci_port *ap, struct ata_port *at, struc
     struct ExpansionBase *ExpansionBase;
     BOOL dos_loaded;
     struct DeviceNode *devnode;
-    TEXT dosdevname[4] = "HA0";
+    TEXT dosdevstem[3] = "HD";
     const ULONG DOS_ID = AROS_MAKE_ID('D','O','S','\001');
     const ULONG CDROM_ID = AROS_MAKE_ID('C','D','V','D');
 
     unit->au_UnitNum = device_get_unit(ap->ap_sc->sc_dev) * 32 + ap->ap_num;
 
-    D(bug("[AHCI>>] %s()\n", __PRETTY_FUNCTION__)); 
+    D(bug("[AHCI>>] %s()\n", __func__)); 
     D(bug("[AHCI>>] %s: ap = %p, at = %p, unit = %d\n", __func__, ap, at, ap->ap_sim ? ap->ap_sim->sim_Unit : -1));
 
     /* See if dos.library has run */
@@ -251,7 +251,7 @@ static BOOL ahci_RegisterVolume(struct ahci_port *ap, struct ata_port *at, struc
         case ATA_PORT_T_DISK:
             break;
         case ATA_PORT_T_ATAPI:
-            dosdevname[0] = 'C';
+            dosdevstem[0] = 'C';
             break;
         default:
             D(bug("[AHCI>>]:-ahci_RegisterVolume called on unknown devicetype\n"));
@@ -262,14 +262,32 @@ static BOOL ahci_RegisterVolume(struct ahci_port *ap, struct ata_port *at, struc
 
     if (ExpansionBase)
     {
+        struct AHCIBase *AHCIBase = ap->ap_sc->sc_dev->dev_AHCIBase;
+        TEXT dosdevname[4];
+        struct TagItem AHCIIDTags[] = 
+        {
+            {tHidd_Storage_IDStem,  (IPTR)dosdevstem        },
+            {TAG_DONE,              0                       }  
+        };
         IPTR pp[4 + DE_BOOTBLOCKS + 1];
 
-        if (ap->ap_num < 10)
-            dosdevname[2] += ap->ap_num;
+        if ((ap->ap_IDNode = HIDD_Storage_AllocateID(AHCIBase->storageRoot, AHCIIDTags)))
+        {
+            pp[0] 		    = (IPTR)ap->ap_IDNode->ln_Name;
+        }
         else
-            dosdevname[2] = 'A' + (ap->ap_num - 10);
-    
-        pp[0] 		    = (IPTR)dosdevname;
+        {
+            dosdevname[0] = dosdevstem[0];
+            dosdevname[1] = 'A';
+            dosdevname[2] = '0';
+            if (ap->ap_num < 10)
+                dosdevname[2] += ap->ap_num % 10;
+            else
+                dosdevname[2] = 'A' - 10 + ap->ap_num;
+            pp[0] 		    = (IPTR)dosdevname;
+        }
+
+        pp[0] 		    = (IPTR)ap->ap_IDNode->ln_Name;
         pp[1]		    = (IPTR)MOD_NAME_STRING;
         pp[2]		    = unit->au_UnitNum;
         pp[DE_TABLESIZE    + 4] = DE_BOOTBLOCKS;
@@ -411,7 +429,7 @@ ata_fix_identify(struct ata_identify *id)
 {
 	u_int16_t	*swap;
 	int		i;
-        D(bug("[AHCI] %s()\n", __PRETTY_FUNCTION__)); 
+        D(bug("[AHCI] %s()\n", __func__)); 
 
 	swap = (u_int16_t *)id->serial;
 	for (i = 0; i < sizeof(id->serial) / sizeof(u_int16_t); i++)
@@ -449,7 +467,7 @@ ahci_set_xfer(struct ahci_port *ap, struct ata_port *atx)
 	struct ata_xfer	*xa;
 	u_int16_t mode;
 	u_int16_t mask;
-        D(bug("[AHCI] %s()\n", __PRETTY_FUNCTION__)); 
+        D(bug("[AHCI] %s()\n", __func__)); 
 
 	at = atx ? atx : ap->ap_ata[0];
 
@@ -504,7 +522,7 @@ ahci_cam_probe_disk(struct ahci_port *ap, struct ata_port *atx)
 {
 	struct ata_port *at;
 	struct ata_xfer	*xa;
-        D(bug("[AHCI] %s()\n", __PRETTY_FUNCTION__)); 
+        D(bug("[AHCI] %s()\n", __func__)); 
 
 	at = atx ? atx : ap->ap_ata[0];
 
@@ -634,7 +652,7 @@ ahci_cam_probe_disk(struct ahci_port *ap, struct ata_port *atx)
 static int
 ahci_cam_probe_atapi(struct ahci_port *ap, struct ata_port *atx)
 {
-        D(bug("[AHCI] %s()\n", __PRETTY_FUNCTION__)); 
+        D(bug("[AHCI] %s()\n", __func__)); 
 	ahci_set_xfer(ap, atx);
 	return(0);
 }
@@ -668,7 +686,7 @@ ahci_cam_probe(struct ahci_port *ap, struct ata_port *atx)
 	const char	*scstr;
 	const char	*type;
 
-        D(bug("[AHCI] %s()\n", __PRETTY_FUNCTION__)); 
+        D(bug("[AHCI] %s()\n", __func__)); 
 	error = EIO;
 
 	/*

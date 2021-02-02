@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2011, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc: Internal definitions for the locale.library.
@@ -26,6 +26,9 @@
 #endif
 #ifdef __MORPHOS__
 #include <aros/libcall.h>
+#endif
+#ifndef CLIB_ALIB_PROTOS_H
+#include <clib/alib_protos.h>
 #endif
 
 /* aros_print_not_implemented() macro: */
@@ -154,6 +157,16 @@ struct IntCatalog
 #define ID_LANG MAKE_ID('L','A','N','G')
 #define ID_CSET MAKE_ID('C','S','E','T')
 #define ID_STRS MAKE_ID('S','T','R','S')
+
+static void localeDataStreamFromFormat(CONST_STRPTR format, APTR dataStream,  ULONG *dataSize,
+                             ULONG *indexStream, ULONG *indexSize, ...)
+{
+    va_list empty;
+    va_start(empty, indexSize);
+    GetDataStreamFromFormat(format, empty, dataStream, dataSize,
+                        indexStream, indexSize);
+    va_end(empty);
+}
 
 void dispose_catalog(struct IntCatalog * cat,
                      struct LocaleBase * LocaleBase);

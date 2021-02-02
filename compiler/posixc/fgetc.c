@@ -1,32 +1,33 @@
 /*
-    Copyright © 1995-2013, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     C99 function fgetc().
 */
 
-#include <errno.h>
+#include <aros/debug.h>
+
 #include <dos/dos.h>
 #include <dos/dosextens.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+
+#include <errno.h>
+
 #include "__fdesc.h"
 #include "__stdio.h"
-
-#define DEBUG 0
-#include <aros/debug.h>
 
 /*****************************************************************************
 
     NAME */
 #include <stdio.h>
 
-	int fgetc (
+/*	int fgetc (
 
-/*  SYNOPSIS */
-	FILE * stream)
+    SYNOPSIS
+	FILE * stream
 
-/*  FUNCTION
+    FUNCTION
 	Read one character from the stream. If there is no character
 	available or an error occurred, the function returns EOF.
 
@@ -48,6 +49,7 @@
     INTERNALS
 
 ******************************************************************************/
+int  __posixc_fgetc (	FILE * stream)
 {
     int c;
     fdesc *fdesc = __getfdesc(stream->fd);

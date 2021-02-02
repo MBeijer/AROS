@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc: Implements AROS's generic/amiga-like boot sequence.
@@ -20,6 +20,8 @@
 #include <libraries/expansionbase.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+
+#include <string.h>
 
 #include "dos_intern.h"
 #include "../dosboot/bootflags.h"
