@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2013, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     Change the position in a stream.
@@ -17,7 +17,7 @@
     NAME */
 #include <stdio.h>
 
-	int fseek (
+	int __posixc_fseek (
 
 /*  SYNOPSIS */
 	FILE * stream,
@@ -47,14 +47,14 @@
     EXAMPLE
 
     BUGS
-    Not fully compatible with iso fseek, especially in 'ab' and 'a+b'
+    Not fully compatible with ISO fseek, especially in 'ab' and 'a+b'
     modes
 
     Since it's not possible to use Seek() for directories, this
     implementation fails with EISDIR for directory file descriptors.
 
     SEE ALSO
-	fopen(), fwrite()
+	__posixc_fopen(), fwrite()
 
     INTERNALS
 
@@ -138,16 +138,18 @@
     {
         if (fdesc->fcb->flags & O_WRITE)
         {
-            /* Write '0' to fill up to requested size - compatible fseek does not write but allows write */
-            int i = 0;
+            /* Write '0' to fill up to requested size
+             * compatible fseek does not write but allows write */
             int bytestowrite = finalseekposition - eofposition;
             int chunkcount = (bytestowrite)/128;
+            int remainder = bytestowrite - (chunkcount * 128);
             char zeroarray[128] = {0};
 
             Seek (fh, 0, OFFSET_END);
-            for (i = 0; i < chunkcount; i++)
-                FWrite(fh, (STRPTR)zeroarray, 128, 1);
-            FWrite(fh, (STRPTR)zeroarray, bytestowrite - (chunkcount * 128), 1);
+            if (chunkcount > 0)
+                FWrite (fh, zeroarray, 128, chunkcount);
+            if (remainder > 0)
+                FWrite (fh, zeroarray, remainder, 1);
             Flush (fh);
         }
     }

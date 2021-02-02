@@ -191,6 +191,7 @@ struct PCIDevice
     struct UtilityBase *hd_UtilityBase;	  /* for tags etc */
 
     struct List		hd_TempHCIList;
+
     OOP_Object	       *hd_PCIHidd;
     OOP_AttrBase	hd_HiddAB;
     OOP_AttrBase	hd_HiddPCIDeviceAB;

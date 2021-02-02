@@ -1,16 +1,17 @@
 /*
-    Copyright Â© 1995-2013, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
     $Id$
 
     C99 function printf().
 */
 #include <libraries/stdcio.h>
 
-#define DEBUG 0
 #include <aros/debug.h>
 #if DEBUG
 #include <aros/libcall.h>
 #endif
+
+#include "debug.h"
 
 /*****************************************************************************
 
@@ -242,9 +243,9 @@
 
     BUGS
 	All functions are fully ANSI C3.159-1989 conformant, but provide
-	the additional flags q, Z and ' as well as an additional behaviour
+	the additional flags q, Z and ' as well as an additional behavior
 	of the L and l flags. The latter may be considered to be a bug, as
-	it changes the behaviour of flags defined in ANSI C3.159-1989.
+	it changes the behavior of flags defined in ANSI C3.159-1989.
 
 	The effect of padding the %p format with zeros (either by the 0
 	flag or by specifying a precision), and the benign effect (i.e.,
@@ -253,7 +254,7 @@
 	combinations should be avoided.
 
 	Some combinations of flags defined by ANSI C are not making sense
-	in ANSI C (e.g. %Ld). While they may have a well-defined behaviour
+	in ANSI C (e.g. %Ld). While they may have a well-defined behavior
 	on Linux, this need not to be so on other architectures. Therefore
 	it usually is better to use flags that are not defined by ANSI C at
 	all, i.e. use q instead of L in combination with diouxX conversions
@@ -276,7 +277,7 @@
     int     retval;
     va_list args;
 
-    D(bug("[printf]: StdCIOBase: 0x%x, stdout=0x%x\n",
+    D(bug("[%s] %s: StdCIOBase = 0x%p, stdout = 0x%p\n", STDCNAME, __func__,
           StdCIOBase, StdCIOBase->_stdout
     ));
 

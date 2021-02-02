@@ -46,8 +46,8 @@
 #include "ahci.h"
 #include "timer.h"
 
-u_int32_t AhciForceGen;
-u_int32_t AhciNoFeatures;
+u_int32_t AhciForceGen = 0;
+u_int32_t AhciNoFeatures = 0;
 
 #include LC_LIBDEFS_FILE
 
@@ -73,6 +73,7 @@ static CONST_STRPTR const methBaseIDs[] =
     IID_Hidd_PCIDevice,
     IID_Hidd_PCIDriver,
     IID_HW,
+    IID_Hidd_Storage,
     NULL
 };
 #endif
@@ -81,7 +82,7 @@ static int AHCI_Init(struct AHCIBase *AHCIBase)
 {
     struct BootLoaderBase	*BootLoaderBase;
 
-    D(bug("[AHCI--] %s: ahci.device Initialization\n", __PRETTY_FUNCTION__);)
+    D(bug("[AHCI--] %s()\n", __func__);)
 
     AHCIBase->ahci_UtilityBase = TaggedOpenLibrary(TAGGEDOPEN_UTILITY);
     if (!AHCIBase->ahci_UtilityBase)
@@ -93,7 +94,7 @@ static int AHCI_Init(struct AHCIBase *AHCIBase)
     AHCIBase->ahci_HostCount=0;
 
     BootLoaderBase = OpenResource("bootloader.resource");
-    D(bug("[AHCI--] %s: BootloaderBase = %p\n", __PRETTY_FUNCTION__, BootLoaderBase));
+    D(bug("[AHCI--] %s: BootloaderBase = %p\n", __func__, BootLoaderBase));
     if (BootLoaderBase != NULL)
     {
         struct List *list;
@@ -110,8 +111,28 @@ static int AHCI_Init(struct AHCIBase *AHCIBase)
 
                     if (strstr(CmdLine, "disable"))
                     {
-                        D(bug("[AHCI--] %s: Disabling AHCI support\n", __PRETTY_FUNCTION__));
+                        D(bug("[AHCI--] %s: Disabling AHCI support\n", __func__));
                         return FALSE;
+                    }
+                    if (strstr(CmdLine, "force150"))
+                    {
+                        D(bug("[AHCI--] %s: Forcing AHCI Gen1\n", __func__));
+                        AhciForceGen = 1;
+                    }
+                    if (strstr(CmdLine, "force300"))
+                    {
+                        D(bug("[AHCI--] %s: Forcing AHCI Gen2\n", __func__));
+                        AhciForceGen = 2;
+                    }
+                    if (strstr(CmdLine, "force600"))
+                    {
+                        D(bug("[AHCI--] %s: Forcing AHCI Gen3\n", __func__));
+                        AhciForceGen = 3;
+                    }
+                    if (strstr(CmdLine, "nofeatures"))
+                    {
+                        D(bug("[AHCI--] %s: Disabling AHCI features\n", __func__));
+                        AhciNoFeatures = -1;
                     }
                 }
             }
@@ -125,7 +146,7 @@ static int AHCI_Init(struct AHCIBase *AHCIBase)
     if (AHCIBase->ahci_MemPool == NULL)
         return FALSE;
 
-    D(bug("[AHCI--] %s: MemPool @ %p\n", __PRETTY_FUNCTION__, AHCIBase->ahci_MemPool);)
+    D(bug("[AHCI--] %s: MemPool @ %p\n", __func__, AHCIBase->ahci_MemPool);)
 
 #if defined(__OOP_NOATTRBASES__)
     /* Get some useful bases */
@@ -142,8 +163,10 @@ static int AHCI_Init(struct AHCIBase *AHCIBase)
     }
 #endif
 
-    D(bug("[AHCI--] %s: Base AHCI Hidd Class @ %p\n", __PRETTY_FUNCTION__, AHCIBase->ahciClass);)
-    D(bug("[AHCI--] %s: AHCI PCI Bus Class @ %p\n", __PRETTY_FUNCTION__, AHCIBase->busClass);)
+    D(
+      bug("[AHCI--] %s: Base AHCI Hidd Class @ %p\n", __func__, AHCIBase->ahciClass);
+      bug("[AHCI--] %s: AHCI PCI Bus Class @ %p\n", __func__, AHCIBase->busClass);
+    )
 
     AHCIBase->storageRoot = OOP_NewObject(NULL, CLID_Hidd_Storage, NULL);
     if (!AHCIBase->storageRoot)
@@ -152,7 +175,7 @@ static int AHCI_Init(struct AHCIBase *AHCIBase)
     {
         return FALSE;
     }
-    D(bug("[AHCI--] %s: storage root @ %p\n", __PRETTY_FUNCTION__, AHCIBase->storageRoot);)
+    D(bug("[AHCI--] %s: storage root @ %p\n", __func__, AHCIBase->storageRoot);)
 
     return TRUE;
 }

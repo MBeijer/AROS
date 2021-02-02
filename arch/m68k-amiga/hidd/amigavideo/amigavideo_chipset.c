@@ -91,7 +91,7 @@ VOID resetsprite(struct amigavideo_staticdata *csd)
 VOID setfmode(struct amigavideo_staticdata *csd, struct amigabm_data *bm)
 {
     UWORD fmode;
-    fmode  = csd->fmode_bpl == 2 ? 3 : csd->fmode_bpl;
+    fmode  =  csd->fmode_bpl == 2 ? 3 : csd->fmode_bpl;
     fmode |= (csd->fmode_spr == 2 ? 3 : csd->fmode_spr) << 2;
     if (bm && bm->copld.copper2_fmode) {
         *bm->copld.copper2_fmode = fmode;
@@ -176,8 +176,8 @@ VOID resetmode(struct amigavideo_staticdata *csd)
     custom->copjmp2 = 0;
 
 
-    
-    // fuck aros - waitvblank(csd);
+    // DISABLED ON APOLLOOS
+    // waitvblank(csd);
 
     GfxBase->LOFlist = GfxBase->SHFlist = csd->copper2_backup;
 
@@ -543,9 +543,7 @@ BOOL setmode(struct amigavideo_staticdata *csd, struct amigabm_data *bm)
 
     D(bug("[AmigaVideo] %s(0x%p)\n", __func__, bm));
 
-
     csd->fmode_bpl = csd->aga && csd->aga_enabled ? 2 : 0;
-    //if( bm->depth <= 6 )  csd->fmode_bpl =0;
 
     fetchunit = fetchunits[csd->fmode_bpl * 4 + bm->res];
     maxplanes = fm_maxplanes[csd->fmode_bpl * 4 + bm->res];
@@ -562,7 +560,6 @@ BOOL setmode(struct amigavideo_staticdata *csd, struct amigabm_data *bm)
             GfxBase->ChipRevBits0 = SETCHIPREV_AA;
             csd->aga_enabled = TRUE;
             csd->fmode_bpl = csd->aga && csd->aga_enabled ? 2 : 0;
-            //    if( bm->depth <= 6 )  csd->fmode_bpl =0;
             fetchunit = fetchunits[csd->fmode_bpl * 4 + bm->res];
             maxplanes = fm_maxplanes[csd->fmode_bpl * 4 + bm->res];
         }

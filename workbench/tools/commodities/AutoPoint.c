@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2003, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
     $Id$
 
     AutoPoint commodity -- activates the window under the mouse pointer.
@@ -73,7 +73,7 @@
 #include "strings.h"
 
 #define CATALOG_NAME     "System/Tools/Commodities.catalog"
-#define CATALOG_VERSION  3
+#include "catalogs/catalog_version.h"
 
 
 /***************************************************************************/
@@ -221,7 +221,11 @@ static BOOL initiate(int argc, char **argv, APState *as)
     if (Cli() != NULL)
     {
 	struct RDArgs *rda;
-	IPTR          *args[] = { NULL, (IPTR)FALSE, (IPTR)FALSE };
+	IPTR          *args[] = {
+            NULL,
+            (IPTR *)((IPTR)FALSE),
+            (IPTR *)((IPTR)FALSE)
+        };
 
 	rda = ReadArgs(ARG_TEMPLATE, (IPTR *)args, NULL);
 

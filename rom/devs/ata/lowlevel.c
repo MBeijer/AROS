@@ -1,5 +1,5 @@
 /*
-    Copyright © 2004-2018, The AROS Development Team. All rights reserved.
+    Copyright © 2004-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc:
@@ -23,6 +23,8 @@
 
 #include <devices/timer.h>
 
+#include <string.h>
+
 #include "ata.h"
 #include "ata_bus.h"
 #include "timer.h"
@@ -37,12 +39,12 @@
 #define DATAPI(a) D(a)
 #define DINIT(a) D(a)
 #else
-#define DIRQ(a)      do { } while (0)
-#define DIRQ_MORE(a) do { } while (0)
-#define DUMP(a)      do { } while (0)
-#define DUMP_MORE(a) do { } while (0)
-#define DATA(a)      do { } while (0)
-#define DATAPI(a)    do { } while (0)
+#define DIRQ(a)
+#define DIRQ_MORE(a)
+#define DUMP(a)
+#define DUMP_MORE(a)
+#define DATA(a)
+#define DATAPI(a)
 #define DINIT(a)
 #endif
 /* Errors that shouldn't happen */
@@ -187,7 +189,7 @@ static void ata_IRQNoData(struct ata_Unit *unit, UBYTE status)
     if ((unit->au_cmd_error == 0) && (status & ATAF_ERROR))
         unit->au_cmd_error = HFERR_BadStatus;
 
-    DIRQ(bug("[ATA%02ld] IRQ: NoData - done; status %02lx.\n", unit->au_UnitNum, status));
+    DIRQ(bug("[ATA%02ld] %s: NoData - done; status %02lx.\n", unit->au_UnitNum, __func__, status));
     ata_IRQSetHandler(unit, NULL, NULL, 0, 0);
     ata_IRQSignalTask(unit->au_Bus);
 }
@@ -196,7 +198,7 @@ static void ata_IRQPIORead(struct ata_Unit *unit, UBYTE status)
 {
     if (status & ATAF_DATAREQ)
     {
-	DIRQ(bug("[ATA%02ld] IRQ: PIOReadData - DRQ.\n", unit->au_UnitNum));
+	DIRQ(bug("[ATA%02ld] %s: PIOReadData - DRQ.\n", unit->au_UnitNum, __func__));
 
         Unit_InS(unit, unit->au_cmd_data, unit->au_cmd_length);
 
@@ -212,8 +214,8 @@ static void ata_IRQPIORead(struct ata_Unit *unit, UBYTE status)
 		unit->au_cmd_length = unit->au_cmd_total;
 	    return;
 	}
-	DIRQ(bug("[ATA%02ld] IRQ: PIOReadData - transfer completed.\n",
-            unit->au_UnitNum));
+	DIRQ(bug("[ATA%02ld] %s: PIOReadData - transfer completed.\n",
+            unit->au_UnitNum, __func__));
     }
     else
         unit->au_cmd_error = HFERR_BadStatus;
@@ -280,7 +282,7 @@ static void ata_IRQPIOReadAtapi(struct ata_Unit *unit, UBYTE status)
     ULONG size = 0;
     LONG remainder = 0;
     UBYTE reason = PIO_In(bus, atapi_Reason);
-    DIRQ(bug("[ATAPI] Current status: %ld during READ\n", reason));
+    DIRQ(bug("[ATAPI] %s: Current status: %ld during READ\n", __func__, reason));
 
     /* have we failed yet? */
     if (0 == (status & (ATAF_BUSY | ATAF_DATAREQ)))
@@ -296,11 +298,11 @@ static void ata_IRQPIOReadAtapi(struct ata_Unit *unit, UBYTE status)
         return;
 
     size = PIO_In(bus, atapi_ByteCntH) << 8 | PIO_In(bus, atapi_ByteCntL);
-    DIRQ(bug("[ATAPI] IRQ: data available for read (%ld bytes, max: %ld bytes)\n", size, unit->au_cmd_total));
+    DIRQ(bug("[ATAPI] %s: data available for read (%ld bytes, max: %ld bytes)\n", __func__, size, unit->au_cmd_total));
 
     if (size > unit->au_cmd_total)
     {
-        DERROR(bug("[ATAPI] IRQ: CRITICAL! MORE DATA OFFERED THAN STORAGE CAN TAKE: %ld bytes vs %ld bytes left!\n", size, unit->au_cmd_total));
+        DERROR(bug("[ATAPI] %s: CRITICAL! MORE DATA OFFERED THAN STORAGE CAN TAKE: %ld bytes vs %ld bytes left!\n", __func__, size, unit->au_cmd_total));
         remainder = size - unit->au_cmd_total;
         size = unit->au_cmd_total;
     }
@@ -310,7 +312,7 @@ static void ata_IRQPIOReadAtapi(struct ata_Unit *unit, UBYTE status)
     unit->au_cmd_data = &((UBYTE*)unit->au_cmd_data)[size];
     unit->au_cmd_total -= size;
 
-    DIRQ(bug("[ATAPI] IRQ: %lu bytes read.\n", size));
+    DIRQ(bug("[ATAPI] %s: %lu bytes read.\n", __func__, size));
 
     /*
      * Soak up excess bytes.
@@ -328,7 +330,7 @@ static void ata_IRQPIOWriteAtapi(struct ata_Unit *unit, UBYTE status)
     ULONG size = 0;
     UBYTE reason = PIO_In(bus, atapi_Reason);
 
-    DIRQ(bug("[ATAPI] IRQ: Current status: %ld during WRITE\n", reason));
+    DIRQ(bug("[ATAPI] %s: Current status: %ld during WRITE\n", __func__, reason));
 
     /*
      * have we failed yet?
@@ -348,11 +350,11 @@ static void ata_IRQPIOWriteAtapi(struct ata_Unit *unit, UBYTE status)
         return;
 
     size = PIO_In(bus, atapi_ByteCntH) << 8 | PIO_In(bus, atapi_ByteCntL);
-    DIRQ(bug("[ATAPI] IRQ: data requested for write (%ld bytes, max: %ld bytes)\n", size, unit->au_cmd_total));
+    DIRQ(bug("[ATAPI] %s: data requested for write (%ld bytes, max: %ld bytes)\n", __func__, size, unit->au_cmd_total));
 
     if (size > unit->au_cmd_total)
     {
-        DERROR(bug("[ATAPI] IRQ: CRITICAL! MORE DATA REQUESTED THAN STORAGE CAN GIVE: %ld bytes vs %ld bytes left!\n", size, unit->au_cmd_total));
+        DERROR(bug("[ATAPI] %s: CRITICAL! MORE DATA REQUESTED THAN STORAGE CAN GIVE: %ld bytes vs %ld bytes left!\n", __func__, size, unit->au_cmd_total));
         size = unit->au_cmd_total;
     }
 
@@ -360,7 +362,7 @@ static void ata_IRQPIOWriteAtapi(struct ata_Unit *unit, UBYTE status)
     unit->au_cmd_data = &((UBYTE*)unit->au_cmd_data)[size];
     unit->au_cmd_total -= size;
 
-    DIRQ(bug("[ATAPI] IRQ: %lu bytes written.\n", size));
+    DIRQ(bug("[ATAPI] %s: %lu bytes written.\n", __func__, size));
 
     if (unit->au_cmd_total == 0)
         ata_IRQSetHandler(unit, &ata_IRQNoData, NULL, 0, 0);
@@ -373,25 +375,54 @@ static BOOL ata_WaitBusyTO(struct ata_Unit *unit, UWORD tout, BOOL irq,
     BOOL fake_irq, UBYTE *stout)
 {
     struct ata_Bus *bus = unit->au_Bus;
-    UBYTE status = 0xff;
+    UBYTE status = 0x5e; /* Mask all bits EXCEPT BSY/DF/ERR */
     ULONG step = 0;
     BOOL res = TRUE;
+
+    DIRQ(
+        bug("[ATA%02ld] %s(%s, %s)...\n",
+            unit->au_UnitNum, __func__,
+            (irq) ? "TRUE" :  "FALSE",
+            (fake_irq) ? "TRUE" :  "FALSE");
+    )
 
     if (bus->ab_Base->ata_Poll)
         irq = FALSE;
 
+    DIRQ(
+        bug("[ATA%02ld] %s: using IRQ mode = %s\n",
+            unit->au_UnitNum, __func__,
+            (irq) ? "TRUE" :  "FALSE");
+        bug("[ATA%02ld] %s: timeout = %u...\n",
+            unit->au_UnitNum, __func__, tout);
+    )
     if (irq)
     {
+        DIRQ(bug("[ATA%02ld] %s: IRQ mode\n", unit->au_UnitNum, __func__);)
         /* Do not read ata_Status in irq mode. It can cause random lost interrupts. */
         if (bus->haveAltIO)
             status = PIO_InAlt(bus, ata_AltStatus);
+
         /*
-         * wait for either IRQ or timeout
+         * If we already have an error reported by Alt status,
+         * dont wait or the IRQ will never arrive!
          */
-        DIRQ(bug("[ATA%02ld] Waiting (Current status: %02lx)...\n",
-            unit->au_UnitNum, status));
-        step = ata_WaitTO(unit->au_Bus->ab_Timer, tout, 0,
-            1 << bus->ab_SleepySignal);
+        if ((!(status & (1 << 7))) && (status & ((1 << 5) | (1 << 0))))
+        {
+            fake_irq = TRUE;
+            bug("[ATA%02ld] %s: %s occured, status = %02lx, ata error %lx\n",
+                unit->au_UnitNum, __func__, (status & (1 << 5)) ? "drive fault" : "error", status, PIO_In(bus, ata_Error));
+            DIRQ(bug("[ATA%02ld] %s: faking completion IRQ (real IRQ will not come)\n", unit->au_UnitNum, __func__);)
+        }
+        else
+        {
+            /*
+             * wait for either IRQ or timeout
+             */
+            DIRQ(bug("[ATA%02ld] Waiting (Current status: %02lx)...\n", unit->au_UnitNum, status);)
+            step = ata_WaitTO(unit->au_Bus->ab_Timer, tout, 0,
+                1 << bus->ab_SleepySignal);
+        }
 
         if (step == 0)
         {
@@ -417,11 +448,12 @@ static BOOL ata_WaitBusyTO(struct ata_Unit *unit, UWORD tout, BOOL irq,
     }
     else
     {
+        DIRQ(bug("[ATA%02ld] %s: no IRQ mode\n", unit->au_UnitNum, __func__);)
         status = PIO_InAlt(bus, ata_AltStatus);
         while (status & ATAF_BUSY)
         {
             ++step;
-
+            DIRQ(bug("[ATA%02ld] %s: step #%u\n", unit->au_UnitNum, __func__, step);)
             /*
              * every 16n rounds do some extra stuff
              */
@@ -444,7 +476,6 @@ static BOOL ata_WaitBusyTO(struct ata_Unit *unit, UWORD tout, BOOL irq,
                  */
                 ata_WaitTO(unit->au_Bus->ab_Timer, 0, 1000, 0);
             }
-
             status = PIO_InAlt(bus, ata_AltStatus);
         }
     }
@@ -497,12 +528,20 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
      * don't produce an IRQ when the Identify command is complete, so we call
      * the interrupt handler "manually" if we time out while waiting for it.
      */
-    BOOL fake_irq = block->command == ATA_IDENTIFY_DEVICE
-        || block->command == ATA_IDENTIFY_ATAPI;
-    UWORD timeout = fake_irq? 1 : TIMEOUT;
+    BOOL fake_irq = ((block->command == ATA_IDENTIFY_DEVICE)
+        || (block->command == ATA_IDENTIFY_ATAPI));
+    UWORD timeout = (fake_irq) ? 1 : TIMEOUT;
 
+    DATA(
+        bug("[ATA%02ld] %s(0x%p, %u)\n", unit->au_UnitNum, __func__, unit, fake_irq);
+        bug("[ATA%02ld] %s: bus @ 0x%p\n", unit->au_UnitNum, __func__, bus);
+        bug("[ATA%02ld] %s: selecting unit..\n", unit->au_UnitNum, __func__);
+    )
     if (FALSE == ata_SelectUnit(unit))
+    {
+        bug("[ATA%02ld] %s:     unit busy\n", unit->au_UnitNum, __func__);
         return IOERR_UNITBUSY;
+    }
 
     switch (block->type)
     {
@@ -510,7 +549,7 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
         case CT_LBA28:
             if (block->sectors > 256)
             {
-                DERROR(bug("[ATA%02ld] ata_exec_cmd: ERROR: Transfer length (%ld) exceeds 256 sectors. Aborting.\n", unit->au_UnitNum, block->sectors));
+                DERROR(bug("[ATA%02ld] %s: ERROR: Transfer length (%ld) exceeds 256 sectors. Aborting.\n", unit->au_UnitNum, __func__, block->sectors));
                 return IOERR_BADLENGTH;
             }
 
@@ -522,12 +561,12 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
         case CT_LBA48:
             if (block->sectors > 65536)
             {
-                DERROR(bug("[ATA%02ld] ata_exec_cmd: ERROR: Transfer length (%ld) exceeds 65536 sectors. Aborting.\n", unit->au_UnitNum, block->sectors));
+                DERROR(bug("[ATA%02ld] %s: ERROR: Transfer length (%ld) exceeds 65536 sectors. Aborting.\n", unit->au_UnitNum, __func__, block->sectors));
                 return IOERR_BADLENGTH;
             }
             if (block->secmul == 0)
             {
-                DERROR(bug("[ATA%02ld] ata_exec_cmd: ERROR: Invalid transfer multiplier. Should be at least set to 1 (correcting)\n", unit->au_UnitNum));
+                DERROR(bug("[ATA%02ld] %s: ERROR: Invalid transfer multiplier. Should be at least set to 1 (correcting)\n", unit->au_UnitNum, __func__));
                 block->secmul = 1;
             }
            break;
@@ -536,12 +575,12 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
             break;
 
         default:
-            DERROR(bug("[ATA%02ld] ata_exec_cmd: ERROR: Invalid command type %lx. Aborting.\n", unit->au_UnitNum, block->type));
+            DERROR(bug("[ATA%02ld] %s: ERROR: Invalid command type %lx. Aborting.\n", unit->au_UnitNum, block->type, __func__));
             return IOERR_NOCMD;
     }
 
     block->actual = 0;
-    D(bug("[ATA%02ld] ata_exec_cmd: Executing command %02lx\n", unit->au_UnitNum, block->command));
+    DATA(bug("[ATA%02ld] %s: Executing command %02lx\n", unit->au_UnitNum, block->command, __func__);)
 
     if (block->feature != 0)
         PIO_Out(bus, block->feature, ata_Feature);
@@ -552,7 +591,7 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
     switch (block->type)
     {
         case CT_CHS:
-            DATA(bug("[ATA%02ld] ata_exec_cmd: Command uses CHS addressing (OLD)\n", unit->au_UnitNum));
+            DATA(bug("[ATA%02ld] %s: Command uses CHS addressing (OLD)\n", unit->au_UnitNum, __func__));
             {
                 ULONG cyl, head, sector;
                 ULONG tmp = unit->au_Heads * unit->au_Sectors;
@@ -568,7 +607,7 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
             }
             break;
         case CT_LBA28:
-            DATA(bug("[ATA%02ld] ata_exec_cmd: Command uses 28bit LBA addressing (OLD)\n", unit->au_UnitNum));
+            DATA(bug("[ATA%02ld] %s: Command uses 28bit LBA addressing (OLD)\n", unit->au_UnitNum, __func__));
 
             PIO_Out(bus, ((block->blk >> 24) & 0x0f) | DEVHEAD_VAL | unit->au_DevMask, ata_DevHead);
             PIO_Out(bus, block->blk >> 16, ata_LBAHigh);
@@ -578,7 +617,7 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
             break;
 
         case CT_LBA48:
-            DATA(bug("[ATA%02ld] ata_exec_cmd: Command uses 48bit LBA addressing (NEW)\n", unit->au_UnitNum));
+            DATA(bug("[ATA%02ld] %s: Command uses 48bit LBA addressing (NEW)\n", unit->au_UnitNum, __func__));
 
             PIO_Out(bus, DEVHEAD_VAL | unit->au_DevMask, ata_DevHead);
             PIO_Out(bus, block->blk >> 40, ata_LBAHigh);
@@ -594,7 +633,7 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
             break;
 
         case CT_NoBlock:
-            DATA(bug("[ATA%02ld] ata_exec_cmd: Command does not address any block\n", unit->au_UnitNum));
+            DATA(bug("[ATA%02ld] %s: Command does not address any block\n", unit->au_UnitNum, __func__));
             break;
     }
 
@@ -637,9 +676,10 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
      * send command now
      * let drive propagate its signals
      */
-    DATA(bug("[ATA%02ld] ata_exec_cmd: Sending command\n", unit->au_UnitNum));
+    DATA(bug("[ATA%02ld] %s: Sending command\n", unit->au_UnitNum, __func__);)
 
     PIO_Out(bus, block->command, ata_Command);
+    DATA(bug("[ATA%02ld] %s: waiting 400ns (bus ab_Base = 0x%p) ..\n", unit->au_UnitNum, __func__, bus->ab_Base);)
     ata_WaitNano(400, bus->ab_Base);
     //ata_WaitTO(unit->au_Bus->ab_Timer, 0, 1, 0);
 
@@ -650,17 +690,18 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
      */
     if (block->method == CM_PIOWrite)
     {
+    DATA(bug("[ATA%02ld] %s: waiting for PIO write completion ...\n", unit->au_UnitNum, __func__);)
 	if (FALSE == ata_WaitBusyTO(unit, TIMEOUT, FALSE, FALSE, &status)) {
-	    DERROR(bug("[ATA%02ld] ata_exec_cmd: PIOWrite - no response from device. Status %02X\n", unit->au_UnitNum, status));
+	    DERROR(bug("[ATA%02ld] %s: PIOWrite - no response from device. Status %02X\n", unit->au_UnitNum, __func__, status));
 	    return IOERR_UNITBUSY;
 	}
 	if (status & ATAF_DATAREQ) {
-	    DATA(bug("[ATA%02ld] ata_exec_cmd: PIOWrite - DRQ.\n", unit->au_UnitNum));
+	    DATA(bug("[ATA%02ld] %s: PIOWrite - DRQ.\n", unit->au_UnitNum, __func__));
 	    ata_PIOWriteBlk(unit);
 	}
 	else
 	{
-	    DERROR(bug("[ATA%02ld] ata_exec_cmd: PIOWrite - bad status: %02X\n", status));
+	    DERROR(bug("[ATA%02ld] %s: PIOWrite - bad status: %02X\n", unit->au_UnitNum, __func__, status));
 	    return HFERR_BadStatus;
 	}
     }
@@ -668,15 +709,16 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
     /*
      * wait for drive to complete what it has to do
      */
+    DATA(bug("[ATA%02ld] %s: waiting for drive (timeout %u)..\n", unit->au_UnitNum, __func__, timeout);)
     if (FALSE == ata_WaitBusyTO(unit, timeout, TRUE, fake_irq, &status))
     {
-        DERROR(bug("[ATA%02ld] ata_exec_cmd: Device is late - no response\n", unit->au_UnitNum));
+        DERROR(bug("[ATA%02ld] %s: Device is late - no response\n", unit->au_UnitNum, __func__));
         err = IOERR_UNITBUSY;
     }
     else
         err = unit->au_cmd_error;
 
-    DATA(bug("[ATA%02ld] ata_exec_cmd: Command done\n", unit->au_UnitNum));
+    DATA(bug("[ATA%02ld] %s: Command done\n", unit->au_UnitNum, __func__);)
 
     /*
      * clean up DMA
@@ -696,7 +738,7 @@ static BYTE ata_exec_cmd(struct ata_Unit* unit, ata_CommandBlock *block)
         break; /* Shut up the compiler */
     }
 
-    D(bug("[ATA%02ld] ata_exec_cmd: return code %ld\n", unit->au_UnitNum, err));
+    D(bug("[ATA%02ld] %s: return code %ld\n", unit->au_UnitNum, __func__, err));
     return err;
 }
 
@@ -745,7 +787,7 @@ static BYTE atapi_SendPacket(struct ata_Unit *unit, APTR packet, APTR data,
     }
 
     DATAPI({
-        bug("[ATA%02lx] Sending %s ATA packet: ", unit->au_UnitNum, (*dma) ? "DMA" : "PIO");
+        bug("[ATA%02lx] %s: Sending %s ATA packet: ", unit->au_UnitNum, __func__, (*dma) ? "DMA" : "PIO");
         l=0;
         while (l<=t)
         {
@@ -755,7 +797,7 @@ static BYTE atapi_SendPacket(struct ata_Unit *unit, APTR packet, APTR data,
         bug("\n");
 
         if (datalen & 1)
-            bug("[ATAPI] ERROR: DATA LENGTH NOT EVEN! Rounding Up! (%ld bytes requested)\n", datalen);
+            bug("[ATAPI] %s: ERROR - DATA LENGTH NOT EVEN! Rounding Up! (%ld bytes requested)\n", __func__, datalen);
     });
 
     datalen = (datalen+1)&~1;
@@ -971,47 +1013,78 @@ BOOL ata_setup_unit(struct ata_Bus *bus, struct ata_Unit *unit)
      * this stuff always goes along the same way
      * WARNING: NO INTERRUPTS AT THIS POINT!
      */
-    UBYTE u;
+    UBYTE u = (unit->au_UnitNum & 1), status;
 
-    DINIT(bug("[ATA  ] ata_setup_unit(%d)\n", unit->au_UnitNum));
+//    DINIT(
+        bug("[ATA%02ld] %s()\n", unit->au_UnitNum, __func__);
+        bug("[ATA%02ld] %s: sending select unit\n", unit->au_UnitNum, __func__);
+//    )
     ata_SelectUnit(unit);
 
     if (FALSE == ata_WaitBusyTO(unit, 1, FALSE, FALSE, NULL))
     {
-        DINIT(bug("[ATA%02ld] ata_setup_unit: ERROR: Drive not ready for use. Keeping functions stubbed\n", unit->au_UnitNum));
+        bug("[ATA%02ld] %s: ERROR: Drive not ready for use. Keeping functions stubbed\n", unit->au_UnitNum, __func__);
         return FALSE;
     }
 
-    u = unit->au_UnitNum & 1;
-    switch (bus->ab_Dev[u])
+    status = PIO_InAlt(bus, ata_AltStatus);
+    if (!(status & ((1 << 0) | (1 << 5))))
     {
-        /*
-         * safe fallback settings
-         */
-        case DEV_SATAPI:
-        case DEV_ATAPI:
-        case DEV_SATA:
-        case DEV_ATA:
-            unit->au_Identify = ata_Identify;
-            break;
 
-        default:
-            DINIT(bug("[ATA%02ld] ata_setup_unit: Unsupported device %lx. All functions will remain stubbed.\n", unit->au_UnitNum, bus->ab_Dev[u]));
-            return FALSE;
+        bug("[ATA%02ld] %s: device type %u\n", unit->au_UnitNum, __func__, bus->ab_Dev[u]);
+
+        switch (bus->ab_Dev[u])
+        {
+            /*
+             * safe fallback settings
+             */
+            case DEV_SATAPI:
+            case DEV_ATAPI:
+            case DEV_SATA:
+            case DEV_ATA:
+                bug("[ATA%02ld] %s:     * ATA\n", unit->au_UnitNum, __func__);
+                unit->au_Identify = ata_Identify;
+                break;
+
+            default:
+                DINIT(bug("[ATA%02ld] %s: Unsupported device %lx. All functions will remain stubbed.\n", unit->au_UnitNum, __func__, bus->ab_Dev[u]));
+                return FALSE;
+        }
+
+        status = PIO_InAlt(bus, ata_AltStatus);
+        bug("[ATA%02ld] %s: status before enabling IRQs = %lx\n", unit->au_UnitNum, __func__, status);
+
+        PIO_OutAlt(bus, 0x0, ata_AltControl);
+
+        status = PIO_InAlt(bus, ata_AltStatus);
+        if (!(status & ((1 << 0) | (1 << 5))))
+        {
+            /*
+             * now make unit self diagnose
+             */
+            bug("[ATA%02ld] %s: performing self identify (func @ 0x%p)\n", unit->au_UnitNum, __func__, unit->au_Identify);
+            if ((status = unit->au_Identify(unit)) == 0)
+                return TRUE;
+            
+            bug("[ATA%02ld] %s: identify failed, status = %02lx (ata error %lx)\n", unit->au_UnitNum, __func__, status, PIO_In(bus, ata_Error));
+        }
+        else
+        {
+            bug("[ATA%02ld] %s: error/fault after enabling IRQ's (status = %lx)\n", unit->au_UnitNum, __func__, status);
+        }
+        
     }
-
-    DINIT(bug("[ATA  ] ata_setup_unit: Enabling IRQs\n"));
-    PIO_OutAlt(bus, 0x0, ata_AltControl);
-
-    /*
-     * now make unit self diagnose
-     */
-    if (unit->au_Identify(unit) != 0)
+    else
     {
-        return FALSE;
+        bug("[ATA%02ld] %s: error/fault after selecting unit (status = %lx)\n", unit->au_UnitNum, __func__, status);
     }
+    bug("[ATA%02ld] %s: setup failed\n", unit->au_UnitNum, __func__);
 
-    return TRUE;
+    /* flag that there is no unit attached */
+    bus->ab_Dev[u] = DEV_NONE;
+    unit->au_Identify = NULL;
+
+    return FALSE;
 }
 
 /*
@@ -1319,29 +1392,47 @@ static BYTE ata_Identify(struct ata_Unit *unit)
         CT_NoBlock
     };
     UWORD n = 0, *p, *limit;
+    BYTE status;
 
     /* If the right command fails, try the wrong one. If both fail, abort */
-    DINIT(bug("[ATA%02ld] ata_Identify: Executing ATA_IDENTIFY_%s command\n",
-        unit->au_UnitNum, atapi ? "ATAPI" : "DEVICE"));
-    if (ata_exec_cmd(unit, &acb))
+//    DINIT(
+        bug("[ATA%02ld] %s: Executing ATA_IDENTIFY_%s command\n",
+        unit->au_UnitNum, __func__, atapi ? "ATAPI" : "DEVICE");
+//    )
+    if ((status = ata_exec_cmd(unit, &acb)) != 0)
     {
         acb.command = atapi ? ATA_IDENTIFY_DEVICE : ATA_IDENTIFY_ATAPI;
-        DINIT(bug("[ATA%02ld] ata_Identify: Executing ATA_IDENTIFY_%s command"
-            " instead\n", unit->au_UnitNum, atapi ? "DEVICE" : "ATAPI"));
-        if (ata_exec_cmd(unit, &acb))
+//        DINIT(
+        bug("[ATA%02ld] %s: failed (status = %lx)\n", unit->au_UnitNum, __func__, status);
+        //ata_ResetBus(bus);
+        bug("[ATA%02ld] %s: Executing ATA_IDENTIFY_%s command"
+            " instead\n", unit->au_UnitNum, __func__, atapi ? "DEVICE" : "ATAPI");
+//        )
+        if ((status = ata_exec_cmd(unit, &acb)) != 0)
         {
-            DINIT(bug("[ATA%02ld] ata_Identify: Both command variants failed."
+//            DINIT(
+            bug("[ATA%02ld] %s: failed (status = %lx)\n", unit->au_UnitNum, __func__, status);
+            bug("[ATA%02ld] %s: Both command variants failed."
                 " Discarding drive.\n",
-                unit->au_UnitNum));
+                unit->au_UnitNum, __func__);
+//            )
+            //ata_ResetBus(bus);
             return IOERR_OPENFAIL;
         }
         unit->au_Bus->ab_Dev[unit->au_UnitNum & 1] ^= 0x82;
         atapi = unit->au_Bus->ab_Dev[unit->au_UnitNum & 1] & 0x80;
-        DINIT(bug("[ATA%02ld] ata_Identify:"
+//        DINIT(
+        bug("[ATA%02ld] %s:"
             " Incorrect device signature detected."
-            " Switching device type to %lx.\n", unit->au_UnitNum,
-            unit->au_Bus->ab_Dev[unit->au_UnitNum & 1]));
+            " Switching device type to %lx.\n",
+            unit->au_UnitNum, __func__,
+            unit->au_Bus->ab_Dev[unit->au_UnitNum & 1]);
+//        )
     }
+//    DINIT(
+        bug("[ATA%02ld] %s: IDENTIFY done\n",
+        unit->au_UnitNum, __func__);
+//    )
 
     /*
      * If every second word is zero with 32-bit reads, switch to 16-bit
@@ -1354,8 +1445,10 @@ static BYTE ata_Identify(struct ata_Unit *unit)
 
         if (n == 0)
         {
-            DINIT(bug("[ATA%02ld] Identify data was invalid with 32-bit reads."
-                " Switching to 16-bit mode.\n", unit->au_UnitNum));
+//            DINIT(
+            bug("[ATA%02ld] %s: Identify data was invalid with 32-bit reads."
+                " Switching to 16-bit mode.\n", unit->au_UnitNum, __func__);
+//            )
 
             Unit_Disable32Bit(unit);
 
@@ -1442,17 +1535,19 @@ static BYTE ata_Identify(struct ata_Unit *unit)
         unit->au_Flags         |= AF_DiscPresent | AF_DiscChanged;
     }
 
+    bug("[ATA%02ld] %s: copying unit strings ..\n", unit->au_UnitNum, __func__);
+
     ata_strcpy(unit->au_Drive->id_Model, unit->au_Model, 40);
     ata_strcpy(unit->au_Drive->id_SerialNumber, unit->au_SerialNumber, 20);
     ata_strcpy(unit->au_Drive->id_FirmwareRev, unit->au_FirmwareRev, 8);
 
-    bug("[ATA%02ld] ata_Identify: Unit info: %s / %s / %s\n", unit->au_UnitNum, unit->au_Model, unit->au_SerialNumber, unit->au_FirmwareRev);
+    bug("[ATA%02ld] %s: Unit info: %s / %s / %s\n", unit->au_UnitNum, __func__, unit->au_Model, unit->au_SerialNumber, unit->au_FirmwareRev);
     common_DetectXferModes(unit);
     common_SetBestXferMode(unit);
 
     if (unit->au_Drive->id_General & 0x80)
     {
-        DINIT(bug("[ATA%02ld] ata_Identify: Device is removable.\n", unit->au_UnitNum));
+        DINIT(bug("[ATA%02ld] %s: Device is removable.\n", unit->au_UnitNum, __func__));
         unit->au_Flags |= AF_Removable;
     }
 
@@ -1465,8 +1560,8 @@ static BYTE ata_Identify(struct ata_Unit *unit)
     else
         unit->au_Capacity48 = unit->au_Capacity;
 
-    DINIT(bug("[ATA%02ld] ata_Identify: Unit LBA%d: %07lx 28bit / %04lx:%08lx 48bit addressable blocks\n",
-        unit->au_UnitNum, supportLBA48 ? 48 : (supportLBA ? 28 : 0),
+    DINIT(bug("[ATA%02ld] %s: Unit LBA%d: %07lx 28bit / %04lx:%08lx 48bit addressable blocks\n",
+        unit->au_UnitNum, __func__, supportLBA48 ? 48 : (supportLBA ? 28 : 0),
         unit->au_Capacity, (ULONG)(unit->au_Capacity48 >> 32), (ULONG)(unit->au_Capacity48 & 0xfffffffful)));
 
     if (atapi)
@@ -2114,47 +2209,47 @@ static ULONG ata_ReadSignature(struct ata_Bus *bus, int unit,
 {
     UBYTE tmp1, tmp2;
 
-    D(bug("[ATA  ] ata_ReadSignature(%02ld)\n", unit));
+    D(bug("[ATA  ] %s(%02ld)\n", __func__, unit));
 
     PIO_Out(bus, DEVHEAD_VAL | (unit << 4), ata_DevHead);
     ata_WaitNano(400, bus->ab_Base);
     //ata_WaitTO(bus->ab_Timer, 0, 1, 0);
 
-    DINIT(bug("[ATA  ] ata_ReadSignature: Status %02lx Device %02lx\n",
-          ata_ReadStatus(bus), PIO_In(bus, ata_DevHead)));
+    DINIT(bug("[ATA  ] %s: Status %02lx Device %02lx\n",
+          __func__, ata_ReadStatus(bus), PIO_In(bus, ata_DevHead)));
 
     /* Ok, ATA/ATAPI device. Get detailed signature */
-    DINIT(bug("[ATA  ] ata_ReadSignature: ATA[PI] device present. Attempting to detect specific subtype\n"));
+    DINIT(bug("[ATA  ] %s: ATA[PI] device present. Attempting to detect specific subtype\n", __func__));
 
     tmp1 = PIO_In(bus, ata_LBAMid);
     tmp2 = PIO_In(bus, ata_LBAHigh);
 
-    DINIT(bug("[ATA  ] ata_ReadSignature: Subtype check returned %02lx:%02lx (%04lx)\n", tmp1, tmp2, (tmp1 << 8) | tmp2));
+    DINIT(bug("[ATA  ] %s: Subtype check returned %02lx:%02lx (%04lx)\n", __func__, tmp1, tmp2, (tmp1 << 8) | tmp2));
 
     switch ((tmp1 << 8) | tmp2)
     {
         case 0x14eb:
-            DINIT(bug("[ATA  ] ata_ReadSignature: Found signature for ATAPI device\n"));
+            DINIT(bug("[ATA  ] %s: Found signature for ATAPI device\n", __func__));
             return DEV_ATAPI;
 
         case 0x3cc3:
-            DINIT(bug("[ATA  ] ata_ReadSignature: Found signature for SATA device\n"));
+            DINIT(bug("[ATA  ] %s: Found signature for SATA device\n", __func__));
             return DEV_SATA;
 
         case 0x6996:
-            DINIT(bug("[ATA  ] ata_ReadSignature: Found signature for SATAPI device\n"));
+            DINIT(bug("[ATA  ] %s: Found signature for SATAPI device\n", __func__));
             return DEV_SATAPI;
 
         default:
             if (0 == (ata_ReadStatus(bus) & 0xfe)) {
-                DINIT(bug("[ATA  ] ata_ReadSignature: Found NONE\n"));
+                DINIT(bug("[ATA  ] %s: Found NONE\n", __func__));
                 return DEV_NONE;
             }
 
             /* ATA_EXECUTE_DIAG is executed by both devices, do it only once */
             if (!*DiagExecuted)
             {
-                DINIT(bug("[ATA  ] ata_ReadSignature: ATA_EXECUTE_DIAG\n"));
+                DINIT(bug("[ATA  ] %s: ATA_EXECUTE_DIAG\n", __func__));
                 PIO_Out(bus, ATA_EXECUTE_DIAG, ata_Command);
                 *DiagExecuted = TRUE;
             }
@@ -2164,7 +2259,7 @@ static ULONG ata_ReadSignature(struct ata_Bus *bus, int unit,
                 ata_WaitNano(400, bus->ab_Base);
                 //ata_WaitTO(bus->ab_Timer, 0, 1, 0);
 
-            DINIT(bug("[ATA  ] ata_ReadSignature: ATAF_BUSY wait finished\n"));
+            DINIT(bug("[ATA  ] %s: ATAF_BUSY wait finished\n", __func__));
 
             PIO_Out(bus, DEVHEAD_VAL | (unit << 4), ata_DevHead);
             do
@@ -2173,17 +2268,17 @@ static ULONG ata_ReadSignature(struct ata_Bus *bus, int unit,
                 //ata_WaitTO(unit->au_Bus->ab_Timer, 0, 1, 0);
             }
             while (0 != (ATAF_BUSY & ata_ReadStatus(bus)));
-            DINIT(bug("[ATA  ] ata_ReadSignature: Further validating ATA signature: %lx & 0x7f = 1, %lx & 0x10 = unit\n",
-                      PIO_In(bus, ata_Error), PIO_In(bus, ata_DevHead)));
+            DINIT(bug("[ATA  ] %s: Further validating ATA signature: %lx & 0x7f = 1, %lx & 0x10 = unit\n",
+                      __func__, PIO_In(bus, ata_Error), PIO_In(bus, ata_DevHead)));
 
             if ((PIO_In(bus, ata_Error) & 0x7f) == 1)
             {
-                DINIT(bug("[ATA  ] ata_ReadSignature: Found *valid* signature for ATA device\n"));
+                DINIT(bug("[ATA  ] %s: Found *valid* signature for ATA device\n", __func__));
                 /* this might still be an (S)ATAPI device, but we correct that in ata_Identify */
                 return DEV_ATA;
             }
-            DERROR(bug("[ATA  ] ata_ReadSignature: Found signature for ATA "
-                "device, but further validation failed\n"));
+            DERROR(bug("[ATA  ] %s: Found signature for ATA "
+                "device, but further validation failed\n", __func__));
             return DEV_NONE;
     }
 }
@@ -2198,7 +2293,7 @@ static void ata_ResetBus(struct ata_Bus *bus)
      * Set and then reset the soft reset bit in the Device Control
      * register. This causes device 0 to be selected.
      */
-    DINIT(bug("[ATA  ] ata_ResetBus()\n"));
+    DINIT(bug("[ATA  ] %s()\n", __func__));
 
     PIO_Out(bus, DEVHEAD_VAL, ata_DevHead); /* Select it never the less */
     ata_WaitNano(400, ATABase);
@@ -2220,7 +2315,7 @@ static void ata_ResetBus(struct ata_Bus *bus)
     /* If there is a device 0, wait for device 0 to clear BSY */
     if (DEV_NONE != bus->ab_Dev[0])
     {
-        DINIT(bug("[ATA  ] ata_ResetBus: Wait for master to clear BSY\n"));
+        DINIT(bug("[ATA  ] %s: Wait for master to clear BSY\n", __func__));
         TimeOut = 1000;     /* Timeout 1s (1ms x 1000) */
 
         while ( 1 )
@@ -2229,19 +2324,19 @@ static void ata_ResetBus(struct ata_Bus *bus)
                 break;
             ata_WaitTO(bus->ab_Timer, 0, 1000, 0);
             if (!(--TimeOut)) {
-                DINIT(bug("[ATA%02ld] ata_ResetBus: Master device Timed Out!\n"));
+                DINIT(bug("[ATA%02ld] %s: Master device Timed Out!\n", __func__));
                 bus->ab_Dev[0] = DEV_NONE;
                 break;
             }
         }
-        DINIT(bug("[ATA  ] ata_ResetBus: Wait left after %d ms\n", 1000 - TimeOut));
+        DINIT(bug("[ATA  ] %s: Wait left after %d ms\n", __func__, 1000 - TimeOut));
     }
 
     /* If there is a device 1, wait some time until device 1 allows
      * register access, but fail only if BSY isn't cleared */
     if (DEV_NONE != bus->ab_Dev[1])
     {
-        DINIT(bug("[ATA  ] ata_ResetBus: Wait DEV1 to allow access\n"));
+        DINIT(bug("[ATA  ] %s: Wait DEV1 to allow access\n", __func__));
         PIO_Out(bus, DEVHEAD_VAL | (1 << 4), ata_DevHead);
         ata_WaitNano(400, bus->ab_Base);
         //ata_WaitTO(bus->ab_Timer, 0, 1, 0);
@@ -2254,13 +2349,13 @@ static void ata_ResetBus(struct ata_Bus *bus)
             ata_WaitTO(bus->ab_Timer, 0, 1000, 0);
             if (!(--TimeOut))
             {
-                DINIT(bug("[ATA  ] ata_ResetBus: DEV1 1/2 TimeOut!\n"));
+                DINIT(bug("[ATA  ] %s: DEV1 1/2 TimeOut!\n", __func__));
                 break;
             }
         }
-        DINIT(bug("[ATA  ] ata_ResetBus: DEV1 1/2 Wait left after %d ms\n", 1000 - TimeOut));
+        DINIT(bug("[ATA  ] %s: DEV1 1/2 Wait left after %d ms\n", __func__, 1000 - TimeOut));
 
-        DINIT(bug("[ATA  ] ata_ResetBus: Wait for slave to clear BSY\n"));
+        DINIT(bug("[ATA  ] %s: Wait for slave to clear BSY\n", __func__));
         TimeOut = 1000;     /* Timeout 1s (1ms x 1000) */
         while ( 1 )
         {
@@ -2268,18 +2363,32 @@ static void ata_ResetBus(struct ata_Bus *bus)
                 break;
             ata_WaitTO(bus->ab_Timer, 0, 1000, 0);
             if (!(--TimeOut)) {
-                DINIT(bug("[ATA  ] ata_ResetBus: Slave device Timed Out!\n"));
+                DINIT(bug("[ATA  ] %s: Slave device Timed Out!\n", __func__));
                 bus->ab_Dev[1] = DEV_NONE;
                 break;
             }
         }
-        DINIT(bug("[ATA  ] ata_ResetBus: Wait left after %d ms\n", 1000 - TimeOut));
+        DINIT(bug("[ATA  ] %s: Wait left after %d ms\n", __func__, 1000 - TimeOut));
     }
 
     if (DEV_NONE != bus->ab_Dev[0])
-        bus->ab_Dev[0] = ata_ReadSignature(bus, 0, &DiagExecuted);
+    {
+        UBYTE sigtype = ata_ReadSignature(bus, 0, &DiagExecuted);
+        /* Only alter the type if we get a better type probed from the signature ..*/
+        if (sigtype > bus->ab_Dev[0])
+        {
+            bus->ab_Dev[0] = sigtype;
+        }
+    }
     if (DEV_NONE != bus->ab_Dev[1])
-        bus->ab_Dev[1] = ata_ReadSignature(bus, 1, &DiagExecuted);
+    {
+        UBYTE sigtype = ata_ReadSignature(bus, 1, &DiagExecuted);
+        /* Only alter the type if we get a better type probed from the signature ..*/
+        if (sigtype > bus->ab_Dev[1])
+        {
+            bus->ab_Dev[1] = sigtype;
+        }
+    }
 }
 
 void ata_InitBus(struct ata_Bus *bus)
@@ -2293,49 +2402,50 @@ void ata_InitBus(struct ata_Bus *bus)
     /*
      * initialize timer for the sake of scanning
      */
-    bus->ab_Timer = ata_OpenTimer(bus->ab_Base);
-
-    OOP_GetAttr(obj, aHidd_ATABus_UseIOAlt, &haveAltIO);
-    bus->haveAltIO = haveAltIO != 0;
-
-    DINIT(bug("[ATA  ] ata_InitBus(%p)\n", bus));
-
-    bus->ab_Dev[0] = DEV_NONE;
-    bus->ab_Dev[1] = DEV_NONE;
-
-    /* Check if device 0 and/or 1 is present on this bus. It may happen that
-       a single drive answers for both device addresses, but the phantom
-       drive will be filtered out later */
-    for (i = 0; i < MAX_BUSUNITS; i++)
+    if ((bus->ab_Timer = ata_OpenTimer(bus->ab_Base)) != NULL)
     {
-        /* Select device and disable IRQs */
-        PIO_Out(bus, DEVHEAD_VAL | (i << 4), ata_DevHead);
-        ata_WaitTO(bus->ab_Timer, 0, 400, 0);
-        PIO_OutAlt(bus, ATACTLF_INT_DISABLE, ata_AltControl);
+        OOP_GetAttr(obj, aHidd_ATABus_UseIOAlt, &haveAltIO);
+        bus->haveAltIO = haveAltIO != 0;
 
-        /* Write some pattern to registers. This is a variant of a more
-           common technique, with the difference that we don't use the
-           sector count register because some bad ATAPI drives disallow
-           writing to it */
-        PIO_Out(bus, 0x55, ata_LBALow);
-        PIO_Out(bus, 0xaa, ata_LBAMid);
-        PIO_Out(bus, 0xaa, ata_LBALow);
-        PIO_Out(bus, 0x55, ata_LBAMid);
-        PIO_Out(bus, 0x55, ata_LBALow);
-        PIO_Out(bus, 0xaa, ata_LBAMid);
+        DINIT(bug("[ATA  ] %s(%p)\n", __func__, bus));
 
-        tmp1 = PIO_In(bus, ata_LBALow);
-        tmp2 = PIO_In(bus, ata_LBAMid);
-        DB2(bug("[ATA  ] ata_InitBus: Reply 0x%02X 0x%02X\n", tmp1, tmp2));
+        bus->ab_Dev[0] = DEV_NONE;
+        bus->ab_Dev[1] = DEV_NONE;
 
-        if ((tmp1 == 0x55) && (tmp2 == 0xaa))
-            bus->ab_Dev[i] = DEV_UNKNOWN;
-        DINIT(bug("[ATA  ] ata_InitBus: Device type = 0x%02X\n", bus->ab_Dev[i]));
+        /* Check if device 0 and/or 1 is present on this bus. It may happen that
+           a single drive answers for both device addresses, but the phantom
+           drive will be filtered out later */
+        for (i = 0; i < MAX_BUSUNITS; i++)
+        {
+            /* Select device and disable IRQs */
+            PIO_Out(bus, DEVHEAD_VAL | (i << 4), ata_DevHead);
+            ata_WaitTO(bus->ab_Timer, 0, 400, 0);
+            PIO_OutAlt(bus, ATACTLF_INT_DISABLE, ata_AltControl);
+
+            /* Write some pattern to registers. This is a variant of a more
+               common technique, with the difference that we don't use the
+               sector count register because some bad ATAPI drives disallow
+               writing to it */
+            PIO_Out(bus, 0x55, ata_LBALow);
+            PIO_Out(bus, 0xaa, ata_LBAMid);
+            PIO_Out(bus, 0xaa, ata_LBALow);
+            PIO_Out(bus, 0x55, ata_LBAMid);
+            PIO_Out(bus, 0x55, ata_LBALow);
+            PIO_Out(bus, 0xaa, ata_LBAMid);
+
+            tmp1 = PIO_In(bus, ata_LBALow);
+            tmp2 = PIO_In(bus, ata_LBAMid);
+            DB2(bug("[ATA  ] %s: Reply 0x%02X 0x%02X\n", __func__, tmp1, tmp2));
+
+            if ((tmp1 == 0x55) && (tmp2 == 0xaa))
+                bus->ab_Dev[i] = DEV_UNKNOWN;
+            DINIT(bug("[ATA  ] %s: Device type = 0x%02X\n", __func__, bus->ab_Dev[i]));
+        }
+
+        ata_ResetBus(bus);
+        ata_CloseTimer(bus->ab_Timer);
     }
-
-    ata_ResetBus(bus);
-    ata_CloseTimer(bus->ab_Timer);
-    DINIT(bug("[ATA  ] ata_InitBus: Finished\n"));
+    DINIT(bug("[ATA  ] %s: Finished\n", __func__));
 }
 
 /*
@@ -2365,18 +2475,18 @@ static BYTE atapi_EndCmd(struct ata_Unit *unit)
     struct ata_Bus *bus = unit->au_Bus;
     UBYTE status;
 
-    DATAPI(bug("[ATA%02ld] atapi_EndCmd()\n", unit->au_UnitNum));
+    DATAPI(bug("[ATA%02ld] %s()\n", __func__, unit->au_UnitNum));
 
     /*
      * read alternate status register (per specs)
      */
     status = PIO_InAlt(bus, ata_AltStatus);
-    DATAPI(bug("[ATA%02ld] atapi_EndCmd: Alternate status: %lx\n", unit->au_UnitNum, status));
+    DATAPI(bug("[ATA%02ld] %s: Alternate status: %lx\n", __func__, unit->au_UnitNum, status));
 
     status = PIO_In(bus, atapi_Status);
 
-    DATAPI(bug("[ATA%02ld] atapi_EndCmd: Command complete. Status: %lx\n",
-        unit->au_UnitNum, status));
+    DATAPI(bug("[ATA%02ld] %s: Command complete. Status: %lx\n",
+        __func__, unit->au_UnitNum, status));
 
     if (!(status & ATAPIF_CHECK))
     {
@@ -2385,7 +2495,7 @@ static BYTE atapi_EndCmd(struct ata_Unit *unit)
     else
     {
        status = PIO_In(bus, atapi_Error);
-       DATAPI(bug("[ATA%02ld] atapi_EndCmd: Error code 0x%lx\n", unit->au_UnitNum, status >> 4));
+       DATAPI(bug("[ATA%02ld] %s: Error code 0x%lx\n", __func__, unit->au_UnitNum, status >> 4));
        return ErrorMap[status >> 4];
     }
 }

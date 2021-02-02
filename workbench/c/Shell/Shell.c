@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2014, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 */
 
@@ -7,7 +7,8 @@
    Break support (and +(0L) before execution) -- CreateNewProc()?
  */
 
-#define DEBUG 0
+#include <aros/debug.h>
+
 #include <dos/dos.h>
 #include <dos/stdio.h>
 #include <dos/cliinit.h>
@@ -19,8 +20,7 @@
 #include <proto/exec.h>
 
 #include <ctype.h>
-
-#include <aros/debug.h>
+#include <string.h>
 
 #include "Shell.h"
 
@@ -69,7 +69,7 @@ LONG interact(ShellState *ss)
     setInteractive(cli, ss);
 
     /* pre-allocate input buffer */
-    if ((error = bufferAppend("?", 1, &in, SysBase))) /* FIXME drop when readLine ok */
+    if ((error = bufferAppend("?", 1, &in, ss))) /* FIXME drop when readLine ok */
 	return error;
 
     do {
@@ -162,8 +162,8 @@ LONG interact(ShellState *ss)
         }
     } while (moreLeft);
 
-    bufferFree(&in, SysBase);
-    bufferFree(&out, SysBase);
+    bufferFree(&in, ss);
+    bufferFree(&out, ss);
 
     return error;
 }

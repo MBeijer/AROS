@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2012, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc:
@@ -15,8 +15,6 @@
 #include <libraries/locale.h>
 #include <aros/asmcall.h>
 #include "locale_intern.h"
-
-#include <clib/alib_protos.h>
 
 #include <aros/debug.h>
 
@@ -48,7 +46,7 @@ APTR InternalFormatString(const struct Locale * locale,
     template_pos = 0;           /* Current position in the template string */
     state = OUTPUT;             /* current state of parsing */
     end = FALSE;
-    max_argpos = 1;
+    max_argpos = 0;
     arg_counter = 0;
     max_argpos_datasize = 0;
 
@@ -573,6 +571,9 @@ APTR InternalFormatString(const struct Locale * locale,
         }
     }
 
+    if (max_argpos == 0)
+        return dataStream;
+
     return (APTR)(ARG(max_argpos) + max_argpos_datasize);
 }
 
@@ -615,11 +616,6 @@ APTR InternalFormatString(const struct Locale * locale,
     ULONG indexSize = 0;
     APTR retval;
     struct Locale *def_locale = NULL;
-#if defined(__arm__) || defined(__x86_64__) || defined(__powerpc__)
-    va_list nullarg = {};
-#else
-    va_list nullarg = 0;
-#endif
 
     if (locale == NULL)
     {
@@ -628,9 +624,9 @@ APTR InternalFormatString(const struct Locale * locale,
     }
 
     /* Generate the indexes for the provided datastream */
-    GetDataStreamFromFormat(fmtTemplate, nullarg, NULL, NULL, NULL, &indexSize);
+    localeDataStreamFromFormat(fmtTemplate, NULL, NULL, NULL, &indexSize);
     indices = alloca(indexSize);
-    GetDataStreamFromFormat(fmtTemplate, nullarg, NULL, NULL, indices, &indexSize);
+    localeDataStreamFromFormat(fmtTemplate, NULL, NULL, indices, &indexSize);
 
     retval = InternalFormatString(locale, fmtTemplate,
                                 dataStream, indices, putCharFunc);

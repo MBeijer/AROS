@@ -26,12 +26,14 @@
 #include "systemprefswindow.h"
 #include "systemprefswindow_private.h"
 
-#define CATALOG_VERSION (2)
+#include "catalogs/catalog_version.h"
 #define CATCOMP_ARRAY
 #include "strings.h"
 
 #define DEBUG 1
 #include <aros/debug.h>
+
+#include <string.h>
 
 /*** Macros *****************************************************************/
 #define SETUP_INST_DATA struct SystemPrefsWindow_DATA *data = INST_DATA(CLASS, self)

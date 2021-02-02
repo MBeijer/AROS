@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2017, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc: Formats a message and makes sure the user will see it.
@@ -31,7 +31,7 @@
 	const STRPTR mainSystem,
 	const STRPTR subSystem,
 	int level,
-	const UBYTE * fmt,
+	const char * fmt,
 	...)
 
 /*  FUNCTION
@@ -83,9 +83,6 @@
 {
     va_list	 ap;
     int 	 ret;
-
-    /* FIXME check the systems and the debug level */
-    // Check SysBase->DebugAROSBase->DebugConfig
 
     va_start(ap, fmt);
     ret = vkprintf((const char *)fmt, ap);

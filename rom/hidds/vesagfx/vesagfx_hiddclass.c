@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2017, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc: Class for VESA.
@@ -66,12 +66,14 @@ OOP_Object *VESAGfx__Root__New(OOP_Class *cl, OOP_Object *o, struct pRoot_New *m
     };
     struct TagItem sync_mode[] =
     {
-	{aHidd_Sync_HDisp,      0},
-	{aHidd_Sync_VDisp,      0},
-	{aHidd_Sync_HMax,	16384},
-	{aHidd_Sync_VMax,	16384},
-	{aHidd_Sync_Description, (IPTR)"VESA:%hx%v"},
-	{TAG_DONE, 0UL}
+        {aHidd_Sync_PixelClock,         0                       },
+        {aHidd_Sync_HTotal,             0                       },
+	{aHidd_Sync_HDisp,              0                       },
+	{aHidd_Sync_VDisp,              0                       },
+	{aHidd_Sync_HMax,               16384                   },
+	{aHidd_Sync_VMax,               16384                   },
+	{aHidd_Sync_Description,        (IPTR)"VESA:%hx%v"      },
+	{TAG_DONE,                      0UL                     }
     };
     struct TagItem modetags[] =
     {
@@ -79,7 +81,7 @@ OOP_Object *VESAGfx__Root__New(OOP_Class *cl, OOP_Object *o, struct pRoot_New *m
 	{aHidd_Gfx_SyncTags,   (IPTR)sync_mode},
 	{TAG_DONE, 0UL}
     };
-    struct TagItem yourtags[] =
+    struct TagItem msgNewTags[] =
     {
 	{aHidd_Gfx_ModeTags, (IPTR)modetags},
         { aHidd_Name            , (IPTR)"vesagfx.hidd"     },
@@ -87,7 +89,7 @@ OOP_Object *VESAGfx__Root__New(OOP_Class *cl, OOP_Object *o, struct pRoot_New *m
         { aHidd_ProducerName    , (IPTR)"vesa.org"  },
 	{TAG_MORE, 0UL}
     };
-    struct pRoot_New yourmsg;
+    struct pRoot_New msgNew;
 
     EnterFunc(bug("VESAGfx::New()\n"));
 
@@ -108,14 +110,18 @@ OOP_Object *VESAGfx__Root__New(OOP_Class *cl, OOP_Object *o, struct pRoot_New *m
     pftags[11].ti_Data = (XSD(cl)->data.bitsperpixel > 24) ? 24 : XSD(cl)->data.bitsperpixel;
     pftags[14].ti_Data = (1 << XSD(cl)->data.depth) - 1;
 
-    sync_mode[0].ti_Data = XSD(cl)->data.width;
-    sync_mode[1].ti_Data = XSD(cl)->data.height;
+    sync_mode[0].ti_Data = 60 * XSD(cl)->data.width * XSD(cl)->data.height;
+    sync_mode[1].ti_Data = XSD(cl)->data.width;
+    sync_mode[2].ti_Data = XSD(cl)->data.width;
+    sync_mode[3].ti_Data = XSD(cl)->data.height;
 
-    yourtags[1].ti_Data = (IPTR)msg->attrList;
-    yourmsg.mID = msg->mID;
-    yourmsg.attrList = yourtags;
+    if ((msgNewTags[4].ti_Data = (IPTR)msg->attrList) == 0)
+        msgNewTags[4].ti_Tag = TAG_DONE;
 
-    o = (OOP_Object *)OOP_DoSuperMethod(cl, o, (OOP_Msg)&yourmsg);
+    msgNew.mID = msg->mID;
+    msgNew.attrList = msgNewTags;
+
+    o = (OOP_Object *)OOP_DoSuperMethod(cl, o, (OOP_Msg)&msgNew);
     if (o)
     {
 	struct VESAGfxHiddData *data = OOP_INST_DATA(cl, o);

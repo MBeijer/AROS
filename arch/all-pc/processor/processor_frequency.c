@@ -1,15 +1,19 @@
 /*
-    Copyright © 2010-2017, The AROS Development Team. All rights reserved.
+    Copyright © 2010-2020, The AROS Development Team. All rights reserved.
     $Id$
 */
 
-#define DEBUG 0
-
 #include <aros/config.h>
 #include <aros/debug.h>
+
 #include <proto/exec.h>
+#include <proto/utility.h>
+
 #include <resources/processor.h>
 
+#include <string.h>
+
+#include "processor_intern.h"
 #include "processor_arch_intern.h"
 
 /*
@@ -301,13 +305,46 @@ VOID ReadMaxFrequencyInformation(struct X86ProcessorInformation * info)
    using performance counter. Other methods might include reading power state
    and checking with ACPI power tables or hardcoded power tables */
 
-UQUAD GetCurrentProcessorFrequency(struct X86ProcessorInformation * info)
+UQUAD GetCurrentProcessorFrequency(struct ProcessorBase *ProcessorBase, struct X86ProcessorInformation * info)
 {
     UQUAD retFreq = info->MaxCPUFrequency;
 
-    D(bug("[processor.x86] :%s()\n", __func__));
+    D(bug("[processor.x86] %s(0x%p)\n", __func__, info);)
 
 #if (AROS_FLAVOUR & AROS_FLAVOUR_STANDALONE)
+
+    if (info->Features2 & FEATF_HYPERV)
+    {
+        struct UtilityBase *UtilityBase;
+        APTR *procPriv = ProcessorBase->Private1;
+        D(
+            bug("[processor.x86] %s: processor has hyperv flag\n", __func__);
+            bug("[processor.x86] %s: id '%s'\n", __func__, info->HyperVID);
+        )
+
+        /* UtilityBase is embeded in the last slot .. */
+        UtilityBase = procPriv[ProcessorBase->cpucount];
+        D(bug("[processor.x86] %s: UtilityBase @ 0x%p\n", __func__, UtilityBase);)
+
+        if (!Stricmp("Microsoft Hv", info->HyperVID))
+        {
+            ULONG res[2];
+            APTR ssp;
+
+            D(bug("[processor.x86] %s: reading hypervisor MSR...\n", __func__));
+
+            ssp = SuperState();
+
+            /* Read Hypervisor MSR TSC frequency */
+            asm volatile("rdmsr":"=a"(res[0]),"=d"(res[1]):"c"(0x40000022));
+            retFreq = 100 * res[0];
+            D(bug("[processor.x86] %s:    MSR TSC frequency = %u\n", __func__, res[0]);)
+
+            UserState(ssp);
+
+            return retFreq;
+        }
+    }
 
     /*
     Check if APERF/MPERF is available
@@ -320,6 +357,8 @@ UQUAD GetCurrentProcessorFrequency(struct X86ProcessorInformation * info)
         UQUAD startaperf, endaperf, diffaperf = 0;
         UQUAD startmperf, endmperf, diffmperf = 0;
         LONG i;
+
+        D(bug("[processor.x86] %s: using APERF/MPERF...\n", __func__));
 
         ssp = SuperState();
 
@@ -359,7 +398,6 @@ UQUAD GetCurrentProcessorFrequency(struct X86ProcessorInformation * info)
     {
         /* use PStates? */
     }
-
 #endif
 
     return retFreq;

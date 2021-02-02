@@ -2,7 +2,7 @@
 #define SAGAGFX_BITMAP_H
 
 /*
-    Copyright ï¿½ 1995-2020, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
     $Id$
 
     Desc: Bitmap class for SAGAGfx Hidd.

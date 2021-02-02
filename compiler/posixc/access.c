@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2013, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
     $Id$
 
     POSIX.1-2008 function access().
@@ -34,7 +34,7 @@
 	       to be checked:
 
 	       W_OK - for write permission
-	       R_OK - for readpermissions
+	       R_OK - for read permissions
 	       X_OK - for execute permission
 	       F_OK - Just to see whether the file exists
 
@@ -181,7 +181,7 @@
     }
 
     FreeDosObject(DOS_FIB, fib);
-    if (lock);
+    if (lock)
 	UnLock(lock);
 
     return result;

@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2014, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
     $Id$
 
     C99 function getenv().
@@ -12,8 +12,9 @@
 
 #include "__stdcio_intbase.h"
 
-#define DEBUG 0
 #include <aros/debug.h>
+
+#include "debug.h"
 
 /*****************************************************************************
 
@@ -63,7 +64,7 @@
     {
     	LONG len = IoErr();
 
-        D(bug("[getenv] Variable found of size %d\n", size));
+        D(bug("[%s] %s: Variable found of size %d\n", STDCNAME, __func__, len));
 
         if (len + 1 > StdCIOBase->varsize)
         {
@@ -84,13 +85,13 @@
         /* FIXME: maybe this function should be atomic */
         GetVar((char *)name, StdCIOBase->envvar, StdCIOBase->varsize, GVF_BINARY_VAR);
 
-        D(bug("[getenv] Got value \"%s\"\n", StdCIOBase->envvar));
+        D(bug("[%s] %s: Got value \"%s\"\n", STDCNAME, __func__, StdCIOBase->envvar));
 
         return (StdCIOBase->envvar);
     }
     else
     {
-        D(bug("[getenv] Variable not found\n"));
+        D(bug("[%s] %s: Variable not found\n", STDCNAME, __func__));
 
         return NULL;
     }

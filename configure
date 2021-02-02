@@ -634,7 +634,6 @@ KERNEL_DBUS_INCLUDES
 KERNEL_DBUS_KOBJ
 DBUS_LIBFLAGS
 DBUS_CFLAGS
-ENABLE_DBUS
 java_target
 objc_target
 target_binutils_version
@@ -668,6 +667,7 @@ pci_hidd_target
 use_libatomic
 crosstools_cxx_target
 crosstools_target
+aros_target_nostartup_objects
 aros_isa_flags
 aros_isa_extra
 aros_kernel_isa_flags
@@ -693,6 +693,7 @@ aros_config_aflags
 aros_config_cxxflags
 aros_config_cflags
 aros_config_cppflags
+aros_target_cflags
 aros_nowarn_flags
 aros_warn_flags
 aros_shared_ldflags
@@ -904,6 +905,7 @@ infodir
 docdir
 oldincludedir
 includedir
+runstatedir
 localstatedir
 sharedstatedir
 sysconfdir
@@ -1035,6 +1037,7 @@ datadir='${datarootdir}'
 sysconfdir='${prefix}/etc'
 sharedstatedir='${prefix}/com'
 localstatedir='${prefix}/var'
+runstatedir='${localstatedir}/run'
 includedir='${prefix}/include'
 oldincludedir='/usr/include'
 docdir='${datarootdir}/doc/${PACKAGE}'
@@ -1287,6 +1290,15 @@ do
   | -silent | --silent | --silen | --sile | --sil)
     silent=yes ;;
 
+  -runstatedir | --runstatedir | --runstatedi | --runstated \
+  | --runstate | --runstat | --runsta | --runst | --runs \
+  | --run | --ru | --r)
+    ac_prev=runstatedir ;;
+  -runstatedir=* | --runstatedir=* | --runstatedi=* | --runstated=* \
+  | --runstate=* | --runstat=* | --runsta=* | --runst=* | --runs=* \
+  | --run=* | --ru=* | --r=*)
+    runstatedir=$ac_optarg ;;
+
   -sbindir | --sbindir | --sbindi | --sbind | --sbin | --sbi | --sb)
     ac_prev=sbindir ;;
   -sbindir=* | --sbindir=* | --sbindi=* | --sbind=* | --sbin=* \
@@ -1424,7 +1436,7 @@ fi
 for ac_var in	exec_prefix prefix bindir sbindir libexecdir datarootdir \
 		datadir sysconfdir sharedstatedir localstatedir includedir \
 		oldincludedir docdir infodir htmldir dvidir pdfdir psdir \
-		libdir localedir mandir
+		libdir localedir mandir runstatedir
 do
   eval ac_val=\$$ac_var
   # Remove trailing slashes.
@@ -1577,6 +1589,7 @@ Fine tuning of the installation directories:
   --sysconfdir=DIR        read-only single-machine data [PREFIX/etc]
   --sharedstatedir=DIR    modifiable architecture-independent data [PREFIX/com]
   --localstatedir=DIR     modifiable single-machine data [PREFIX/var]
+  --runstatedir=DIR       modifiable per-process data [LOCALSTATEDIR/run]
   --libdir=DIR            object code libraries [EPREFIX/lib]
   --includedir=DIR        C header files [PREFIX/include]
   --oldincludedir=DIR     C header files for non-gcc [/usr/include]
@@ -1934,6 +1947,48 @@ fi
   as_fn_set_status $ac_retval
 
 } # ac_fn_c_try_cpp
+
+# ac_fn_py_try_run LINENO
+# -----------------------
+# Try to link conftest.$ac_ext, and return whether this succeeded. Assumes
+# that executables *can* be run.
+ac_fn_py_try_run ()
+{
+  as_lineno=${as_lineno-"$1"} as_lineno_stack=as_lineno_stack=$as_lineno_stack
+  if { { ac_try="$ac_link"
+case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval ac_try_echo="\"\$as_me:${as_lineno-$LINENO}: $ac_try_echo\""
+$as_echo "$ac_try_echo"; } >&5
+  (eval "$ac_link") 2>&5
+  ac_status=$?
+  $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
+  test $ac_status = 0; } && { ac_try='./conftest$ac_exeext'
+  { { case "(($ac_try" in
+  *\"* | *\`* | *\\*) ac_try_echo=\$ac_try;;
+  *) ac_try_echo=$ac_try;;
+esac
+eval ac_try_echo="\"\$as_me:${as_lineno-$LINENO}: $ac_try_echo\""
+$as_echo "$ac_try_echo"; } >&5
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
+  test $ac_status = 0; }; }; then :
+  ac_retval=0
+else
+  $as_echo "$as_me: program exited with status $ac_status" >&5
+       $as_echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+       ac_retval=$ac_status
+fi
+  rm -rf conftest.dSYM conftest_ipa8_conftest.oo
+  eval $as_lineno_stack; ${as_lineno_stack:+:} unset as_lineno
+  as_fn_set_status $ac_retval
+
+} # ac_fn_py_try_run
 
 # ac_fn_c_try_link LINENO
 # -----------------------
@@ -2747,6 +2802,7 @@ fi
 ac_config_guess="$SHELL $ac_aux_dir/config.guess"  # Please don't use this var.
 ac_config_sub="$SHELL $ac_aux_dir/config.sub"  # Please don't use this var.
 ac_configure="$SHELL $ac_aux_dir/configure"  # Please don't use this var.
+
 
 
 
@@ -4796,7 +4852,8 @@ aros_host_make="make"
 aros_host_cflags="$CFLAGS"
 aros_host_cxxflags="$CXXFLAGS"
 aros_host_cppflags="$CPPFLAGS"
-aros_host_ldflags="$LDFLAGS"
+aros_host_baseldflags="$LDFLAGS"
+aros_host_ldflags="$aros_host_baseldflags"
 aros_host_debug="-g -O0"
 aros_host_mkdep="\$(SRCDIR)/scripts/mkdep"
 aros_host_mkargs="--no-print-directory"
@@ -5112,7 +5169,6 @@ re-running configure" "$LINENO" 5
 fi
         { $as_echo "$as_me:${as_lineno-$LINENO}: result: $LOC" >&5
 $as_echo "$LOC" >&6; }
-        aros_host_cflags="$aros_host_cflags $aros_host_cc_pipe"
         aros_host_arch="darwin"
         host_cc_elf=no
         if [ -z ${SED+x} ]; then SED="gsed"; fi
@@ -5136,8 +5192,22 @@ $as_echo "$as_me: WARNING: \"Unknown CPU for Darwin host -- $host_cpu\"" >&2;}
                 ;;
         esac
 
-        aros_host_ldflags="$aros_host_ldflags -liconv"
+                aros_host_cflags="`echo "$aros_host_cflags" | sed 's|-I/usr/local/include/||g'`"
+        aros_host_cflags="`echo "$aros_host_cflags" | sed 's|-I/usr/local/include||g'`"
+        aros_host_cflags="`echo "$aros_host_cflags" | sed 's|-I/opt/local/include/||g'`"
+        aros_host_cflags="`echo "$aros_host_cflags" | sed 's|-I/opt/local/include||g'`"
+        aros_host_cflags="`echo "$aros_host_cflags" | sed 's|-I/opt/pkg/include/||g'`"
+        aros_host_cflags="`echo "$aros_host_cflags" | sed 's|-I/opt/pkg/include||g'`"
+        aros_host_cflags="$aros_host_cflags $aros_host_cc_pipe"
 
+                aros_host_ldflags="`echo "$aros_host_ldflags" | sed 's|-L/usr/local/lib/||g'`"
+        aros_host_ldflags="`echo "$aros_host_ldflags" | sed 's|-L/usr/local/lib||g'`"
+        aros_host_ldflags="`echo "$aros_host_ldflags" | sed 's|-L/opt/local/lib/||g'`"
+        aros_host_ldflags="`echo "$aros_host_ldflags" | sed 's|-L/opt/local/lib||g'`"
+        aros_host_ldflags="`echo "$aros_host_ldflags" | sed 's|-L/opt/pkg/lib/||g'`"
+        aros_host_ldflags="`echo "$aros_host_ldflags" | sed 's|-L/opt/pkg/lib||g'`"
+
+        aros_host_ldflags="$aros_host_ldflags -liconv"
         ;;
 
     dragonfly*)
@@ -6385,7 +6455,7 @@ if ${am_cv_pathless_PYTHON+:} false; then :
   $as_echo_n "(cached) " >&6
 else
 
-	for am_cv_pathless_PYTHON in python python2 python3 python3.3 python3.2 python3.1 python3.0 python2.7  python2.6 python2.5 python2.4 python2.3 python2.2 python2.1 python2.0 none; do
+	for am_cv_pathless_PYTHON in python python2 python3 python3.8 python3.7 python3.6 python3.5 python3.4 python3.3 python3.2 python3.1 python3.0 python2.7  python2.6 python2.5 python2.4 python2.3 python2.2 python2.1 python2.0 none; do
 	  test "$am_cv_pathless_PYTHON" = none && break
 	  prog="import sys
 # split strings by '.' and convert to numeric.  Append some zeros
@@ -6604,6 +6674,118 @@ $as_echo "$am_cv_python_pyexecdir" >&6; }
 
   fi
 
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking if Python's mako templates are installed" >&5
+$as_echo_n "checking if Python's mako templates are installed... " >&6; }
+
+
+
+
+for ac_prog in python \
+     python3 \
+     python2 \
+                         python4.0                    python3.9                    python3.8                    python3.7                    python3.6                    python3.5                    python3.4                    python3.3                    python3.2                    python3.1                    python3.0                                                            python2.7                    python2.6                    python2.5                    python2.4                    python2.3                    python2.2                    python2.1                    python2.0
+do
+  # Extract the first word of "$ac_prog", so it can be a program name with args.
+set dummy $ac_prog; ac_word=$2
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
+$as_echo_n "checking for $ac_word... " >&6; }
+if ${ac_cv_path_PYTHON+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  case $PYTHON in
+  [\\/]* | ?:[\\/]*)
+  ac_cv_path_PYTHON="$PYTHON" # Let the user override the test with a path.
+  ;;
+  *)
+  as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
+for as_dir in $PATH
+do
+  IFS=$as_save_IFS
+  test -z "$as_dir" && as_dir=.
+    for ac_exec_ext in '' $ac_executable_extensions; do
+  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
+    ac_cv_path_PYTHON="$as_dir/$ac_word$ac_exec_ext"
+    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
+    break 2
+  fi
+done
+  done
+IFS=$as_save_IFS
+
+  ;;
+esac
+fi
+PYTHON=$ac_cv_path_PYTHON
+if test -n "$PYTHON"; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $PYTHON" >&5
+$as_echo "$PYTHON" >&6; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+fi
+
+
+  test -n "$PYTHON" && break
+done
+
+
+
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for Python 'mako' library" >&5
+$as_echo_n "checking for Python 'mako' library... " >&6; }
+if ${pc_cv_python_module_mako+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_ext=py
+ac_compile='chmod +x conftest.$ac_ext >&5'
+ac_link='chmod +x conftest.$ac_ext && cp conftest.$ac_ext conftest >&5'
+     if test "$cross_compiling" = yes; then :
+  { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error $? "cannot run test program while cross compiling
+See \`config.log' for more details" "$LINENO" 5; }
+else
+  cat > conftest.$ac_ext <<_ACEOF
+#!$PYTHON
+import sys
+try:
+    import mako
+except:
+    sys.exit(1)
+else:
+    sys.exit(0)
+
+
+_ACEOF
+if ac_fn_py_try_run "$LINENO"; then :
+  pc_cv_python_module_mako="yes"
+else
+  pc_cv_python_module_mako="no"
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+     ac_ext=c
+ac_cpp='$CPP $CPPFLAGS'
+ac_compile='$CC -c $CFLAGS $CPPFLAGS conftest.$ac_ext >&5'
+ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
+ac_compiler_gnu=$ac_cv_c_compiler_gnu
+
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $pc_cv_python_module_mako" >&5
+$as_echo "$pc_cv_python_module_mako" >&6; }
+if test "$pc_cv_python_module_mako" = "no"; then :
+  { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error $? "failed to detect mako templates
+See \`config.log' for more details" "$LINENO" 5; }
+else
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+fi
 
 
 # Check whether --enable-libpng-config was given.
@@ -7870,6 +8052,8 @@ main ()
     if (*(data + i) != *(data3 + i))
       return 14;
   close (fd);
+  free (data);
+  free (data3);
   return 0;
 }
 _ACEOF
@@ -8183,7 +8367,8 @@ case "$aros_toolchain" in
         toolchain_def_opt_lvl="-O2"
         toolchain_debug_opt_lvl="-O0"
         toolchain_size_opt_lvl="-Os"
-        aros_cxx_ldflags="-L $""(CROSSTOOLSDIR)/lib -stdlib=libc++"
+        aros_target_cflags="$""(CFLAGS_NO_INTEGRATED_AS)"
+        aros_cxx_ldflags="-L $""(CROSSTOOLSDIR)/lib -stdlib=libc++ -static-libstdc++"
         aros_nowarn_flags="$aros_nowarn_flags NOWARN_IGNORED_OPTIMIZATION_ARGUMENT"
         ;;
     *gnu*)
@@ -8801,6 +8986,7 @@ case "$target_cpu" in
         arm_isa_extra="ISA_ARM_FLAGS                = -marm"$gcc_default_endian
         ;;
     *m68k*)
+        target_extra_cfg+="$export_newline""AROSROM_MODULE_CFLAGS          = $""(CFLAGS_NO_BUILTIN)$export_newline"
         m68k_isa_extra="ISA_FLOAT_FLAGS               = -msoft-float""$export_newline""ISA_MC68000_FLAGS             = -march=68000 $""(ISA_FLOAT_FLAGS)"
         m68k_020_isa_extra="ISA_MC68020_FLAGS             = -march=68020 $""(ISA_FLOAT_FLAGS)"
         m68k_030_isa_extra="ISA_MC68030_FLAGS             = -march=68030 $""(ISA_FLOAT_FLAGS)"
@@ -8851,7 +9037,7 @@ case "$target_os" in
                 aros_isa_flags="$""(ISA_MC68000_FLAGS)"
                 aros_shared_ldflags="-Wl,-T,\$(TOP)/config/linux/m68k/script.so"
                 aros_kernel_ldflags="-Wl,-rpath,./lib,-T,\$(TOP)/config/linux/m68k/script.normal"
-                gcc_target_cpu="mc68000"
+                gcc_target_cpu="m68000"
                 ;;
             *i?86*)
                 PLATFORM_EXECSMP="#define __AROSPLATFORM_SMP__"
@@ -9076,6 +9262,12 @@ case "$target_os" in
         aros_target_arch="darwin"
         aros_target_family="unix"
         aros_flavour="emulation"
+        { $as_echo "$as_me:${as_lineno-$LINENO}: checking Where to find the Darwin SDK" >&5
+$as_echo_n "checking Where to find the Darwin SDK... " >&6; }
+        darwin_sdk_path=`xcrun --show-sdk-path`
+        { $as_echo "$as_me:${as_lineno-$LINENO}: result: $darwin_sdk_path" >&5
+$as_echo "$darwin_sdk_path" >&6; }
+        aros_kernel_includes="-isystem $darwin_sdk_path/usr/include"
         case "$target_cpu" in
             *i?86*)
                 PLATFORM_EXECSMP="#define __AROSPLATFORM_SMP__"
@@ -9091,7 +9283,7 @@ case "$target_os" in
                 aros_object_format="elf_i386"
                 aros_kernel_ar_flags="-cr"
                 aros_target_strip_flags="-x"
-                kernel_tool_flags="-m32"
+                kernel_tool_flags=""
                 ;;
             *x86_64*)
                 PLATFORM_EXECSMP="#define __AROSPLATFORM_SMP__"
@@ -9168,6 +9360,11 @@ case "$target_os" in
                 aros_kernel_objcflags="-fobjc-abi-version=2 -fobjc-legacy-dispatch"
             ;;
             *)
+                case "$host_os" in
+                    darwin*)
+                        aros_kernel_ldflags="$aros_host_baseldflags $aros_kernel_ldflags"
+                    ;;
+                esac
                 aros_kernel_cflags="$aros_kernel_cflags -mmacosx-version-min=$aros_macosx_version"
                 aros_kernel_ldflags="$aros_kernel_ldflags -mmacosx-version-min=$aros_macosx_version"
             ;;
@@ -9221,7 +9418,7 @@ case "$target_os" in
                 aros_flavour="emulcompat"
                 aros_target_mkdep="$aros_target_mkdep -D__GNUC__ -D__mc68000 -D__NetBSD__"
                 aros_isa_flags="$""(ISA_MC68000_FLAGS)"
-                gcc_target_cpu="mc68000"
+                gcc_target_cpu="m68000"
                 ;;
             *i?86*)
                 PLATFORM_EXECSMP="#define __AROSPLATFORM_SMP__"
@@ -9404,7 +9601,10 @@ case "$target_os" in
             *armhf*)
                 PLATFORM_EXECSMP="#define __AROSPLATFORM_SMP__"
                 aros_target_cpu="arm"
-                gcc_default_cpu="armv7-a+fp"
+                # we intentionaly leave
+                # gcc_default_cpu empty here
+                # so the correct value is loaded
+                # later.
                 if test "$aros_object_format" = "" ; then
                     aros_object_format="armelf_aros"
                 fi
@@ -9436,10 +9636,10 @@ case "$target_os" in
                 ;;
         esac
 
-        aros_config_cflags="$aros_config_cflags $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
-        aros_config_cxxflags="$aros_config_cxxflags $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
-        aros_config_aflags="$aros_config_aflags $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
-        aros_kernel_cflags="$aros_kernel_cflags $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
+        aros_config_cflags="$aros_config_cflags"
+        aros_config_cxxflags="$aros_config_cxxflags"
+        aros_config_aflags="$aros_config_aflags"
+        aros_kernel_cflags="$aros_kernel_cflags"
 
         case "$aros_target_variant" in
             smp)
@@ -9526,7 +9726,7 @@ fi
                 aros_nominal_depth=8
                 gcc_target_cpu="i386"
 
-                kernel_tool_prefix="i386-mingw32-"
+                kernel_tool_prefix="i686-w64-mingw32-"
                 ;;
             *x86_64*)
                 PLATFORM_EXECSMP="#define __AROSPLATFORM_SMP__"
@@ -9586,7 +9786,7 @@ fi
                 aros_debug_ldflags="$aros_symbols_debug"
                 aros_mungwall_debug="0"
                 aros_modules_debug="0"
-                gcc_target_cpu="mc68000"
+                gcc_target_cpu="m68000"
                 ignore_undefined_symbols="-ius"
                 ;;
            *)
@@ -9621,7 +9821,7 @@ fi
                 aros_debug_ldflags="$aros_symbols_debug"
                 aros_mungwall_debug="0"
                 aros_modules_debug="0"
-                gcc_target_cpu="mc68000"
+                gcc_target_cpu="m68000"
                 ignore_undefined_symbols="-ius"
                 ;;
            *)
@@ -9827,7 +10027,13 @@ $as_echo "release" >&6; }
         fi
     fi
 
+    # from gcc 8, armv7-a+fp is used to specify
+    # hard-float/vfpv3-d16
+    arm_v7_flotattgt="armv7-a+fp"
     if test "$GCC_VERSION_MAJOR" -lt "10" ; then
+        if test "$GCC_VERSION_MAJOR" -lt "8" ; then
+            arm_v7_flotattgt="armv7-a"
+        fi
         aros_config_cflags="$aros_config_cflags $""(CFLAGS_NO_COMMON)"
     fi
 
@@ -9957,6 +10163,7 @@ fi
 $as_echo "$aros_gcc_cpu" >&6; }
         if test "$gcc_default_cpu" != "$aros_gcc_cpu"; then
             aros_target_cpu_extra=$aros_gcc_cpu
+            gcc_target_cpu=mc$aros_gcc_cpu
         fi
         aros_isa_flags="$""(ISA_MC"$aros_gcc_cpu"_FLAGS)"
         ;;
@@ -9967,7 +10174,7 @@ $as_echo "$aros_gcc_cpu" >&6; }
     arm*)
                 aros_isa_extra="$export_newline$arm_isa_extra"
         if test "$gcc_default_cpu" = ""; then
-            gcc_default_cpu="armv7-a+fp"
+            gcc_default_cpu=$arm_v7_flotattgt
         fi
 
         if test "$gcc_default_float_abi" = ""; then
@@ -9980,6 +10187,8 @@ $as_echo "$aros_gcc_cpu" >&6; }
                 gcc_default_float_abi="softfp"
             fi
         fi
+
+        aros_target_nostartup_objects="$""(AROS_LIB)/arm-exidx-unwind.o"
 
         { $as_echo "$as_me:${as_lineno-$LINENO}: checking Which minimum CPU to use" >&5
 $as_echo_n "checking Which minimum CPU to use... " >&6; }
@@ -10034,7 +10243,7 @@ $as_echo "$aros_target_cpu_mode" >&6; }
         case "$aros_target_cpu_mode" in
         arm32)
             gcc_default_mode="arm"
-            aros_isa_extra="$aros_isa_extra -mthumb-interwork -march=$aros_gcc_cpu"
+            aros_isa_extra="$aros_isa_extra -march=$aros_gcc_cpu"
         ;;
         arm64)
             as_fn_error $? "ARM 64-bit mode is unsupported" "$LINENO" 5
@@ -10057,9 +10266,10 @@ $as_echo "$aros_target_cpu_mode" >&6; }
 
         aros_isa_extra="$aros_isa_extra -mfpu=$gcc_default_fpu"$export_newline
 
-        aros_config_cflags="$aros_config_cflags $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
-        aros_config_cxxflags="$aros_config_cxxflags $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
-        aros_config_aflags="$aros_config_aflags $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
+        aros_config_cflags="$aros_config_cflags $""(CFLAGS_NO_UNWIND_TABLES) $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
+        aros_config_cxxflags="$aros_config_cxxflags $""(CFLAGS_NO_UNWIND_TABLES) $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
+        aros_config_aflags="$aros_config_aflags $""(CFLAGS_NO_UNWIND_TABLES) $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
+        aros_kernel_cflags="$aros_kernel_cflags $""(CFLAGS_NO_UNWIND_TABLES) $""(CFLAGS_NO_ASYNCHRONOUS_UNWIND_TABLES) $""(CFLAGS_NO_EXCEPTIONS)"
         ;;
     i386)
         aros_isa_extra="$x86_isa_extra$export_newline$x86_64_isa_extra$export_newline"
@@ -10168,9 +10378,35 @@ if test "$aros_host_cpu" == "x86_64" ; then
 fi
 
 if test "x-$aros_flavour" = "x-emulation" -o "x-$aros_flavour" = "x-emulcompat" ; then
-                                    if test "$aros_host_arch" != "$aros_target_arch" ; then
+
+    if test "$aros_host_arch" != "$aros_target_arch" ; then
         cross_compiling=yes
     fi
+    for ac_header in ucontext.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "ucontext.h" "ac_cv_header_ucontext_h" "$ac_includes_default"
+if test "x$ac_cv_header_ucontext_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_UCONTEXT_H 1
+_ACEOF
+
+fi
+
+done
+
+    for ac_header in sys/ucontext.h
+do :
+  ac_fn_c_check_header_compile "$LINENO" "sys/ucontext.h" "ac_cv_header_sys_ucontext_h" "#include <signal.h>
+"
+if test "x$ac_cv_header_sys_ucontext_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_SYS_UCONTEXT_H 1
+_ACEOF
+
+fi
+
+done
+
 else
                     cross_compiling=yes
     fi
@@ -16059,29 +16295,27 @@ rm -f core conftest.err conftest.$ac_objext \
         fi
     fi
 
-fi
-
-
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking whether building of dbus.library is enabled" >&5
+    if test "x-$HOST_WANTS_DBUS" = "x-yes" ; then
+                { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether building of dbus.library is enabled" >&5
 $as_echo_n "checking whether building of dbus.library is enabled... " >&6; }
-# Check whether --enable-dbus was given.
+        # Check whether --enable-dbus was given.
 if test "${enable_dbus+set}" = set; then :
   enableval=$enable_dbus; dbus="yes"
 else
   dbus="no"
 fi
 
-if test "$dbus" = "yes" ; then
-    ENABLE_DBUS=1
-    DBUS_CFLAGS=`pkg-config --cflags dbus-1`
-    DBUS_LIBFLAGS=`pkg-config --libs dbus-1`
-    KERNEL_DBUS_KOBJ=kernel-dbus-kobj
-    KERNEL_DBUS_INCLUDES=kernel-dbus-includes
-else
-    ENABLE_DBUS=0
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $dbus" >&5
+        if test "$dbus" = "yes" ; then
+            DBUS_CFLAGS=`pkg-config --cflags dbus-1`
+            DBUS_LIBFLAGS=`pkg-config --libs dbus-1`
+            KERNEL_DBUS_KOBJ=kernel-dbus-kobj
+            KERNEL_DBUS_INCLUDES=kernel-dbus-includes
+            aros_target_options+="$export_newline""# Enable DBUS Support$export_newline""OPT_HOST_DBUS              := yes$export_newline"
+        fi
+        { $as_echo "$as_me:${as_lineno-$LINENO}: result: $dbus" >&5
 $as_echo "$dbus" >&6; }
+    fi
+fi
 
 if test "$use_kernel_cc_wrapper" = "yes" ; then
     aros_kernel_cc="${PWD}/${aros_tools_dir}/${aros_target_cpu}-${aros_target_arch}${aros_target_suffix}-elf-${toolchain_c_compiler}"
@@ -16106,8 +16340,24 @@ kernel_optimization_cflags="$kernel_optimization_level"
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $kernel_optimization_level" >&5
 $as_echo "$kernel_optimization_level" >&6; }
 
+export_firstextraline="$export_newline# GCC CPU Config$export_newline"
+if ! test "$aros_gcc_cpu" = "" ; then
+    target_extra_cfg+="$export_firstextraline""GCC_CONFIG_CPU                := $aros_gcc_cpu$export_newline"
+    export_firstextraline=""
+fi
+
 if ! test "$gcc_default_cpu" = "" ; then
-    target_extra_cfg+="$export_newline""# ARM gcc default target$export_newline""GCC_DEFAULT_CPU         := $gcc_default_cpu$export_newline""GCC_DEFAULT_FPU         := $gcc_default_fpu$export_newline""GCC_DEFAULT_FLOAT_ABI   := $gcc_default_float_abi$export_newline""GCC_DEFAULT_MODE        := $gcc_default_mode$export_newline"
+    target_extra_cfg+="$export_firstextraline""GCC_DEFAULT_CPU               := $gcc_default_cpu$export_newline"
+    export_firstextraline=""
+fi
+
+if ! test "$gcc_default_fpu" = "" ; then
+    target_extra_cfg+="$export_firstextraline""GCC_DEFAULT_FPU               := $gcc_default_fpu"
+    export_firstextraline=""
+fi
+
+if ! test "$gcc_default_float_abi" = "" ; then
+    target_extra_cfg+="$export_newline""# ARM gcc default config$export_newline""GCC_DEFAULT_FLOAT_ABI         := $gcc_default_float_abi$export_newline""GCC_DEFAULT_MODE              := $gcc_default_mode$export_newline"
 fi
 
 if test "$use_libatomic" = "yes" ; then
@@ -16302,6 +16552,9 @@ aros_kernel_ranlib=$aros_kernel_ranlib
 
 
 
+
+
+
 # Native version related
 
 
@@ -16359,7 +16612,6 @@ aros_kernel_ranlib=$aros_kernel_ranlib
 
 
 # DBUS related
-
 
 
 

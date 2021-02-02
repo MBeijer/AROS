@@ -1,11 +1,11 @@
 /*
-    Copyright © 1995-2020, The AROS Development Team. All rights reserved.
+    Copyright © 1995-2021, The AROS Development Team. All rights reserved.
     $Id$
 
     POSIX.1-2008 function readdir().
 */
 
-#include "__posixc_intbase.h"
+#include <aros/debug.h>
 
 #include <dos/dos.h>
 #include <proto/dos.h>
@@ -13,12 +13,11 @@
 #include <string.h>
 #include <errno.h>
 
+#include "__posixc_intbase.h"
+
 #include "__fdesc.h"
 #include "__upath.h"
 #include "__dirdesc.h"
-
-#define DEBUG 0
-#include <aros/debug.h>
 
 /*****************************************************************************
 
@@ -41,14 +40,13 @@
         structure, or NULL if an error occurs  or  end-of-file  is
         reached.
 
-	The data returned by readdir() is  overwritten  by  subse­
-        quent calls to readdir() for the same directory stream.
+	The data returned by readdir() is overwritten by subsequent
+        calls to readdir() for the same directory stream.
 
 	According  to POSIX, the dirent structure contains a field
         char d_name[] of unspecified size, with at  most  NAME_MAX
         characters  preceding the terminating null character.  Use
-        of other fields will harm the  portability  of  your  pro­
-        grams.
+        of other fields will harm the portability of your programs.
 
     NOTES
 
