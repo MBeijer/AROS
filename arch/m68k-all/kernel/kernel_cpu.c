@@ -57,7 +57,8 @@ void cpu_Switch(regs_t *regs)
     /* IF we have AMMX (68080) *and* if AMMX bit in SR is set, save AMMX context */
     if (SysBase->AttnFlags & AFF_68080) // && (ctx->cpu.sr & 0x800))
 #endif
-        AROS_UFC1NR(void, AMMXSaveContext,AROS_UFCA(struct AMMXContext *, &ctx->ammx, A0));
+        AROS_UFC1NR(void, AMMXSaveContext,
+                            AROS_UFCA(struct AMMXContext *, &ctx->ammx, A0));
 
     /* Update tc_SPReg */
     task->tc_SPReg = (APTR)regs->a[7];

@@ -142,10 +142,10 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
     }
 
 #if defined(__DISTRONAME__)
-	if (cis == BNULL)
+    if (cis == BNULL)
         cis = Open("CON:////" __DISTRONAME__ " (" __DISTROVERSION__ ", " __DISTRODATE__ ")/AUTO/CLOSE/SMART/BOOT", MODE_OLDFILE);
 #else
-	if (cis == BNULL)
+    if (cis == BNULL)
         cis = Open("CON:////AROS/AUTO/CLOSE/SMART/BOOT", MODE_OLDFILE);
 #endif
 
