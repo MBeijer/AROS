@@ -74,7 +74,6 @@ include $(SRCDIR)/config/aros.cfg
 #MM     kernel-workbook-kobj \
 #MM     kernel-workbench-devs-amiga-m68k \
 #MM     kernel-vampire-amiga-m68k \
-#MM     kernel-sagasd-device-kobj \
 #MM     workbench-libs-gadtools-kobj \
 #MM     workbench-libs-icon-kobj \
 #MM     workbench-libs-lowlevel-kobj \
@@ -86,6 +85,7 @@ include $(SRCDIR)/config/aros.cfg
 #MM     linklibs-loadseg \
 #MM     compiler-stdc \
 #MM     compiler-stdcio \
+#MM     kernel-sagasd-device-kobj \
 #MM     sagasd-device \
 #MM     compiler-posixc
 
