@@ -2,7 +2,7 @@
 #define DOSBOOT_INTERN_H
 
 /*
-   Copyright © 1995-2014, The AROS Development Team. All rights reserved.
+   Copyright ï¿½ 1995-2014, The AROS Development Team. All rights reserved.
    $Id$
 
    Desc: Internal definitions for dosboot
@@ -51,6 +51,7 @@ struct DOSBootBase
     BOOL                 *devicesEnabled;
     struct List           bootList;
     struct List           devicesList;
+    ULONG          debug_pos;
 };
 
 void InitBootConfig(struct BootConfig *bootcfg);
@@ -72,7 +73,7 @@ void anim_Animate(struct Screen *scr, struct DOSBootBase *DOSBootBase);
 /* Check to see if the bootnode is bootable */
 #include <libraries/expansion.h>
 #include <libraries/expansionbase.h>
-
+extern void bugtest(struct DOSBootBase* DOSBootBase, const char *fmt, ...);
 static inline BOOL IsBootableNode(struct BootNode *bootNode)
 {
     return ((bootNode->bn_Node.ln_Type == NT_BOOTNODE) &&

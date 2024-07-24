@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2014, The AROS Development Team. All rights reserved.
+    Copyright ï¿½ 1995-2014, The AROS Development Team. All rights reserved.
     $Id$
 */
 
@@ -11,7 +11,7 @@
  * ciaa.resource and ciab.resource.
  * genmodule does not support such thing, so everything is written
  * by hands here.
- * 
+ *
  * Since we don't use genmodule, we have to use some other way for
  * generating include files. A standard SFD file is used to keep all
  * the definitions, it's processed using sfdc (note that it had to
@@ -20,7 +20,7 @@
  * Note that fd2inline (which also supports generating AROS macros) will
  * generate a BROKEN inline file for this resource. It handles missing
  * base specification incorrectly.
- * 
+ *
  * sonic <pavel_fedin@mail.ru>
  */
 
@@ -72,7 +72,7 @@ AROS_LD1(WORD, SetICR,
 #define RESIDENT_REVISION 1
 
 static const char resident_name[] = RESIDENT_NAME;
-static const char resident_id[]   = "\0$VER:" RESIDENT_NAME " " STR(RESIDENT_VERSION) "." STR(RESIDENT_REVISION) " (" ADATE ")";
+static const char resident_id[]   = "\0$VER: " RESIDENT_NAME " " STR(RESIDENT_VERSION) "." STR(RESIDENT_REVISION) " (" ADATE ")";
 
 AROS_INTP(Cia_Handler);
 
@@ -187,9 +187,9 @@ static AROS_UFH3 (APTR, Cia_Init,
     base->ciaint.is_Code = (APTR)Cia_Handler;
     base->ciaint.is_Data = base;
     AddIntServer(INTB_EXTER, &base->ciaint);
- 
+
     D(bug("CIA-B %p\n", base));
- 
+
     return base;
 
     AROS_USERFUNC_EXIT

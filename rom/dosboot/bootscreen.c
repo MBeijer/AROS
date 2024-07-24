@@ -1,5 +1,5 @@
 /*
-    Copyright © 1995-2014, The AROS Development Team. All rights reserved.
+    Copyright ï¿½ 1995-2014, The AROS Development Team. All rights reserved.
     $Id$
 */
 
@@ -46,7 +46,7 @@ static struct Screen *OpenBootScreenType(struct DOSBootBase *DOSBootBase, BYTE M
 
     if (mode != INVALID_ID)
     {
-	struct Screen *scr = OpenScreenTags(NULL, SA_DisplayID, mode, SA_Draggable, FALSE, 
+	struct Screen *scr = OpenScreenTags(NULL, SA_DisplayID, mode, SA_Draggable, FALSE,
 					    SA_Quiet, TRUE, SA_Depth, MinDepth, TAG_DONE);
 
 	if (scr)
@@ -79,7 +79,7 @@ static struct Screen *OpenBootScreenType2(struct DOSBootBase *DOSBootBase, BYTE 
 
     if (mode != INVALID_ID)
     {
-	struct Screen *scr = OpenScreenTags(NULL, SA_DisplayID, mode, SA_Draggable, FALSE, 
+	struct Screen *scr = OpenScreenTags(NULL, SA_DisplayID, mode, SA_Draggable, FALSE,
 					    SA_Quiet, TRUE, SA_Depth, MinDepth, TAG_DONE);
 
 	if (scr)
@@ -92,9 +92,9 @@ static struct Screen *OpenBootScreenType2(struct DOSBootBase *DOSBootBase, BYTE 
 
 
 struct Screen *OpenBootScreen(struct DOSBootBase *DOSBootBase)
-{   
+{
     /* Boot menu requires basic 4+ color screen */
-    return OpenBootScreenType(DOSBootBase, 2, FALSE);
+    return OpenBootScreenType(DOSBootBase, 4, TRUE);
 }
 
 struct Screen *NoBootMediaScreen(struct DOSBootBase *DOSBootBase)

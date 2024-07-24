@@ -38,6 +38,10 @@
 #include "dosboot_intern.h"
 #include "menu.h"
 
+#include <stdio.h>
+#include <stdarg.h>
+
+
 #define PAGE_MAIN 1
 #define PAGE_BOOT 2
 #define PAGE_DISPLAY 3
@@ -126,8 +130,49 @@ static LONG rightto(LIBBASETYPEPTR DOSBootBase, LONG width, LONG right)
     return DOSBootBase->bm_Screen->Width - width - right;
 }
 
+static void norm_text(LIBBASETYPEPTR DOSBootBase, BYTE pen, WORD x, WORD y, const char *fmt, ...)
+{
+	struct Window *win = DOSBootBase->bm_Window;
+
+	va_list args;
+	char buf[256];
+	struct IntuiText it = {
+		pen, 1,
+		JAM2,
+		0, 0,
+		NULL,
+		buf,
+		NULL
+	};
+
+	va_start(args, fmt);
+	vsprintf(buf, fmt, args);
+	va_end(args);
+	PrintIText(win->RPort, &it, x, y);
+}
 
 
+void bugtest(LIBBASETYPEPTR DOSBootBase, const char *fmt, ...) {
+
+	if (DOSBootBase != NULL) {
+		const int lineHeight = 8;
+		int currentY = (DOSBootBase->debug_pos++)*lineHeight;
+		va_list args;
+		char buf[256];
+		va_start(args, fmt);
+		vsprintf(buf, fmt, args);
+		va_end(args);
+		struct Window *win = DOSBootBase->bm_Window;
+		if (currentY + lineHeight >= win->Height) {
+			// Scroll the content up
+
+			ScrollRaster(win->RPort, 0, lineHeight, 0, 0, win->Width - 1, win->Height - 1);
+			currentY -= lineHeight;
+			DOSBootBase->debug_pos--;
+		}
+		norm_text(DOSBootBase, 2, 1, currentY, buf);
+	}
+}
 
 static void centertext(LIBBASETYPEPTR DOSBootBase, BYTE pen, WORD y, const char *text)
 {
@@ -321,7 +366,6 @@ static BOOL populateGadgets_PageBoot(LIBBASETYPEPTR DOSBootBase, struct Gadget *
 				    size /= 1024;
 				    sunit++;
 			    }
-
 
 				NewRawDoFmt("%s%6s: %s [%08lx]%5d%c %4d %s-%ld", RAWFMTFUNC_STRING, listNode->ln_Name,
 					(DOSBootBase->devicesEnabled[listIndex]? "Enabled: " : "Disabled:"),
@@ -694,7 +738,6 @@ static void initPageExpansion(LIBBASETYPEPTR DOSBootBase)
    }
 }
 
-
 static void initPage(LIBBASETYPEPTR DOSBootBase, WORD page)
 {
     UBYTE *text;
@@ -707,7 +750,7 @@ static void initPage(LIBBASETYPEPTR DOSBootBase, WORD page)
         text = "Boot Options";
     else
         text = __DISTRONAME__ " Early Startup Control";
-    centertext(DOSBootBase, 2, 10, text);
+    //centertext(DOSBootBase, 2, 10, text);
 
     if (page == PAGE_BOOT)
     {
@@ -719,9 +762,9 @@ static void initPage(LIBBASETYPEPTR DOSBootBase, WORD page)
         initPageExpansion(DOSBootBase);
 
     if (page == PAGE_MAIN && (GfxBase->DisplayFlags & (NTSC | PAL))) {
-            ULONG modeid = GetVPModeID(&DOSBootBase->bm_Screen->ViewPort);
-            if (modeid != INVALID_ID && (((modeid & MONITOR_ID_MASK) == NTSC_MONITOR_ID) || ((modeid & MONITOR_ID_MASK) == PAL_MONITOR_ID))) {
-            centertext(DOSBootBase, 1, 30, "(" __DISTROVERSION__ ", " __DISTRODATE__ ")");
+        ULONG modeid = GetVPModeID(&DOSBootBase->bm_Screen->ViewPort);
+        if (modeid != INVALID_ID && (((modeid & MONITOR_ID_MASK) == NTSC_MONITOR_ID) || ((modeid & MONITOR_ID_MASK) == PAL_MONITOR_ID))) {
+            //centertext(DOSBootBase, 2, 30, "(" __DISTROVERSION__ ", " __DISTRODATE__ ")");
         }
     }
 
@@ -731,7 +774,6 @@ static WORD initWindow(LIBBASETYPEPTR DOSBootBase, struct BootConfig *bcfg, WORD
 {
     struct Gadget *gadlist, *firstGadget;
     WORD newpage = -1;
-
     DOSBootBase->bm_GadToolsBase = TaggedOpenLibrary(TAGGEDOPEN_GADTOOLS);
 
     DOSBootBase->bm_VisualInfo = GetVisualInfoA(DOSBootBase->bm_Screen, NULL);
@@ -746,7 +788,7 @@ static WORD initWindow(LIBBASETYPEPTR DOSBootBase, struct BootConfig *bcfg, WORD
             0, 0,                            /* Left, Top */
             DOSBootBase->bm_Screen->Width,   /* Width, Height */
             DOSBootBase->bm_Screen->Height,
-            0, 1,                            /* DetailPen, BlockPen */
+            2, 2,                            /* DetailPen, BlockPen */
             IDCMP_MOUSEBUTTONS | IDCMP_MOUSEMOVE | IDCMP_VANILLAKEY | IDCMP_GADGETUP | IDCMP_GADGETDOWN, /* IDCMPFlags */
             WFLG_SMART_REFRESH | WFLG_BORDERLESS | WFLG_ACTIVATE, /* Flags */
 			gadlist,                         /* FirstGadget */
@@ -762,27 +804,33 @@ static WORD initWindow(LIBBASETYPEPTR DOSBootBase, struct BootConfig *bcfg, WORD
 
         if ((DOSBootBase->bm_Window = OpenWindow(&nw)) != NULL)
         {
-            D(bug("[BootMenu] initScreen: Window opened @ %p\n", DOSBootBase->bm_Window));
-            D(bug("[BootMenu] initScreen: Window RastPort @ %p\n", DOSBootBase->bm_Window->RPort));
-            D(bug("[BootMenu] initScreen: Window UserPort @ %p\n", DOSBootBase->bm_Window->UserPort));
-
+        	struct Window *win = DOSBootBase->bm_Window;
+        	SetRast(win->RPort, 1);
+        	SetBPen(win->RPort, 1);
+            bugtest(DOSBootBase, __DISTRONAME__ " (" __DISTROVERSION__ ", " __DISTRODATE__ ")", DOSBootBase->bm_Window);
+            bugtest(DOSBootBase, "------------------------------------", DOSBootBase->bm_Window);
+            //bugtest(DOSBootBase, "[BootMenu] initScreen: Window opened @ %p\n", DOSBootBase->bm_Window);
+            //bugtest(DOSBootBase, "[BootMenu] initScreen: Window RastPort @ %p\n", DOSBootBase->bm_Window->RPort);
+            //bugtest(DOSBootBase, "[BootMenu] initScreen: Window UserPort @ %p\n", DOSBootBase->bm_Window->UserPort);
+/*
             initPage(DOSBootBase, page);
 
             newpage = msgLoop(DOSBootBase, DOSBootBase->bm_Window, page);
 
             freeGadgets(DOSBootBase, page);
+  */
         }
 
-        CloseWindow(DOSBootBase->bm_Window);
+        //CloseWindow(DOSBootBase->bm_Window);
     }
 
-    FreeGadgets(gadlist);
+    //FreeGadgets(gadlist);
 
-    FreeVisualInfo(DOSBootBase->bm_VisualInfo);
+    //FreeVisualInfo(DOSBootBase->bm_VisualInfo);
 
-    CloseLibrary(DOSBootBase->bm_GadToolsBase);
+    //CloseLibrary(DOSBootBase->bm_GadToolsBase);
 
-    return newpage;
+    return EXIT_BOOT; //newpage;
 }
 
 static BOOL initScreen(LIBBASETYPEPTR DOSBootBase, struct BootConfig *bcfg)
@@ -801,7 +849,7 @@ static BOOL initScreen(LIBBASETYPEPTR DOSBootBase, struct BootConfig *bcfg)
         do {
             page = initWindow(DOSBootBase, bcfg, page);
         } while (page != EXIT_BOOT && page != EXIT_BOOT_WNSS);
-        CloseBootScreen(DOSBootBase->bm_Screen, DOSBootBase);
+        //CloseBootScreen(DOSBootBase->bm_Screen, DOSBootBase);
     }
     return page >= 0;
 }

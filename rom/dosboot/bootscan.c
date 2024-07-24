@@ -59,7 +59,7 @@ static ULONG GetOffset(struct Library *PartitionBase, struct PartitionHandle *ph
     return offset;
 }
 
-static VOID AddPartitionVolume(struct ExpansionBase *ExpansionBase, struct Library *PartitionBase,
+static VOID AddPartitionVolume(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase *ExpansionBase, struct Library *PartitionBase,
 			       struct FileSysStartupMsg *fssm, struct PartitionHandle *table,
 			       struct PartitionHandle *pn, struct ExecBase *SysBase)
 {
@@ -77,7 +77,7 @@ static VOID AddPartitionVolume(struct ExpansionBase *ExpansionBase, struct Libra
     BOOL appended, changed;
     struct Node *fsnode;
 
-    D(bug("[Boot] AddPartitionVolume\n"));
+    (bugtest(DOSBootBase, "[Boot] AddPartitionVolume"));
     GetPartitionTableAttrsTags(table, PTT_TYPE, &pttype, TAG_DONE);
 
     attrs = QueryPartitionAttrs(table);
@@ -86,7 +86,7 @@ static VOID AddPartitionVolume(struct ExpansionBase *ExpansionBase, struct Libra
 
     if (attrs->attribute != TAG_DONE)
     {
-        D(bug("[Boot] RDB/GPT partition\n"));
+        (bugtest(DOSBootBase, "[Boot] RDB/GPT partition"));
 
         /* partition has a name => RDB/GPT partition */
         tags[0] = PT_NAME;
@@ -100,17 +100,17 @@ static VOID AddPartitionVolume(struct ExpansionBase *ExpansionBase, struct Libra
         tags[8] = TAG_DONE;
         GetPartitionAttrs(pn, (struct TagItem *)tags);
 
-        D(bug("[Boot] Partition name: %s bootable: %d automount: %d\n", name, bootable, automount));
+        (bugtest(DOSBootBase, "[Boot] Partition name: %s bootable: %d automount: %d", name, bootable, automount));
 
         if (automount == FALSE)
         {
-        	D(bug("[Boot] Skipping %s so NOMOUNT is SET\n", name));
+        	(bugtest(DOSBootBase, "[Boot] Skipping %s so NOMOUNT is SET", name));
         	return;
         }
     }
     else
     {
-        D(bug("[Boot] MBR/EBR partition\n"));
+        (bugtest(DOSBootBase, "[Boot] MBR/EBR partition"));
 
         /* partition doesn't have a name => MBR/EBR partition */
         tags[0] = PT_POSITION;
@@ -147,7 +147,7 @@ static VOID AddPartitionVolume(struct ExpansionBase *ExpansionBase, struct Libra
         name[i++] = '0' + (UBYTE)(ppos % 10);
         name[i] = '\0';
 
-        D(bug("[Boot] Partition name: %s\n", name));
+        (bugtest(DOSBootBase, "[Boot] Partition name: %s", name));
     }
 
     if ((pp[4 + DE_TABLESIZE] < DE_DOSTYPE) || (pp[4 + DE_DOSTYPE] == 0))
@@ -159,7 +159,7 @@ static VOID AddPartitionVolume(struct ExpansionBase *ExpansionBase, struct Libra
     	 * Here we ignore partitions with DosType == 0 and won't enter them into
     	 * mountlist.
     	 */
-    	D(bug("[Boot] Unknown DosType for %s, skipping partition\n"));
+    	(bugtest(DOSBootBase, "[Boot] Unknown DosType for %s, skipping partition"));
     	return;
     }
 
@@ -202,8 +202,8 @@ static VOID AddPartitionVolume(struct ExpansionBase *ExpansionBase, struct Libra
     blockspercyl = pp[4 + DE_BLKSPERTRACK] * pp[4 + DE_NUMHEADS];
     if (i % blockspercyl != 0)
     {
-        D(bug("[Boot] Start block of subtable not on cylinder boundary: "
-            "%ld (Blocks per Cylinder = %ld)\n", i, blockspercyl));
+        (bugtest(DOSBootBase, "[Boot] Start block of subtable not on cylinder boundary: "
+            "%ld (Blocks per Cylinder = %ld)", i, blockspercyl));
         return;
     }
     i /= blockspercyl;
@@ -235,19 +235,19 @@ static VOID AddPartitionVolume(struct ExpansionBase *ExpansionBase, struct Libra
 
     fsnode = FindFileSystem(table, FST_ID, pp[4 + DE_DOSTYPE], TAG_DONE);
     if (fsnode) {
-        D(bug("[Boot] Found on-disk filesystem 0x%08x\n", pp[4 + DE_DOSTYPE]));
+        (bugtest(DOSBootBase, "[Boot] Found on-disk filesystem 0x%08x", pp[4 + DE_DOSTYPE]));
         AddBootFileSystem(fsnode);
     }
 
     devnode = MakeDosNode(pp);
     if (devnode != NULL) {
         AddBootNode(bootable ? pp[4 + DE_BOOTPRI] : -128, ADNF_STARTPROC, devnode, NULL);
-        D(bug("[Boot] AddBootNode(%b, 0, 0x%p, NULL)\n",  devnode->dn_Name, pp[4 + DE_DOSTYPE]));
+        (bugtest(DOSBootBase, "[Boot] AddBootNode(%b, 0, 0x%p, NULL)",  devnode->dn_Name, pp[4 + DE_DOSTYPE]));
         return;
     }
 }
 
-static BOOL CheckTables(struct ExpansionBase *ExpansionBase, struct Library *PartitionBase,
+static BOOL CheckTables(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase *ExpansionBase, struct Library *PartitionBase,
 			struct FileSysStartupMsg *fssm,	struct PartitionHandle *table,
 			struct ExecBase *SysBase)
 {
@@ -262,8 +262,8 @@ static BOOL CheckTables(struct ExpansionBase *ExpansionBase, struct Library *Par
         while (ph->ln.ln_Succ)
         {
             /* Attempt to add partition to system if it isn't a subtable */
-            if (!CheckTables(ExpansionBase, PartitionBase, fssm, ph, SysBase))
-                AddPartitionVolume(ExpansionBase, PartitionBase, fssm, table,
+            if (!CheckTables(DOSBootBase, ExpansionBase, PartitionBase, fssm, ph, SysBase))
+                AddPartitionVolume(DOSBootBase, ExpansionBase, PartitionBase, fssm, table,
                     ph, SysBase);
             ph = (struct PartitionHandle *)ph->ln.ln_Succ;
         }
@@ -273,12 +273,12 @@ static BOOL CheckTables(struct ExpansionBase *ExpansionBase, struct Library *Par
     return retval;
 }
 
-static VOID CheckPartitions(struct ExpansionBase *ExpansionBase, struct Library *PartitionBase, struct ExecBase *SysBase, struct BootNode *bn)
+static VOID CheckPartitions(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase *ExpansionBase, struct Library *PartitionBase, struct ExecBase *SysBase, struct BootNode *bn)
 {
     struct DeviceNode *dn = bn->bn_DeviceNode;
     BOOL res = FALSE;
 
-    D(bug("CheckPartitions('%b') handler seglist = %x, handler = %s\n", dn->dn_Name,
+    (bugtest(DOSBootBase, "CheckPartitions('%b') handler seglist = %x, handler = %s", dn->dn_Name,
             dn->dn_SegList, AROS_BSTR_ADDR(dn->dn_Handler)));
 
     /* Examples:
@@ -297,7 +297,7 @@ static VOID CheckPartitions(struct ExpansionBase *ExpansionBase, struct Library 
 
 	    if (pt)
             {
-                res = CheckTables(ExpansionBase, PartitionBase, fssm, pt, SysBase);
+                res = CheckTables(DOSBootBase, ExpansionBase, PartitionBase, fssm, pt, SysBase);
 
            	CloseRootPartition(pt);
            }
@@ -340,7 +340,7 @@ void dosboot_BootScan(LIBBASETYPEPTR DOSBootBase)
         	char deviceName[ 256 ];
         	UBYTE deviceNameLength = *(char*)deviceNode->dn_Name;
         	if( deviceNameLength) {	CopyMem( (char*)deviceNode->dn_Name, deviceName, deviceNameLength );	deviceName[ deviceNameLength ] = 0; }
-            CheckPartitions(ExpansionBase, PartitionBase, SysBase, bootNode);
+            CheckPartitions(DOSBootBase, ExpansionBase, PartitionBase, SysBase, bootNode);
         }
 
         ReleaseSemaphore(&IntExpBase(ExpansionBase)->BootSemaphore);
