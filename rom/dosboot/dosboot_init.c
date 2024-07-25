@@ -32,6 +32,7 @@
 #include <proto/expansion.h>
 #include <proto/partition.h>
 #include <proto/bootloader.h>
+#include <resources/dosboot.h>
 
 #include LC_LIBDEFS_FILE
 
@@ -60,7 +61,7 @@ static void bootDelay(LIBBASETYPEPTR DOSBootBase, ULONG timeout)
     timerio.tr_node.io_Message.mn_Length        = sizeof(timermp);
 
     if (OpenDevice("timer.device", UNIT_VBLANK, (struct IORequest *)&timerio, 0) != 0) {
-        (bugtest(DOSBootBase, "[Boot] Can't open timer.device unit 0"));
+        (dosboot_Log2("[Boot] Can't open timer.device unit 0"));
         return;
     }
 
@@ -135,17 +136,20 @@ int dosboot_Init(LIBBASETYPEPTR DOSBootBase)
     ULONG t;
     STRPTR bootDeviceName = NULL;
     /* Show the boot menu if needed */
-    bootmenu_Init(DOSBootBase, WantBootMenu);
+	AddResource(&DOSBootBase->db_Node);
+
+	bootmenu_Init(DOSBootBase, WantBootMenu);
+
     DOSBootBase->delayTicks = 50;
 
-    (bugtest(DOSBootBase, "[Boot] dosboot_Init: GO GO GO!"));
+    (dosboot_Log2("[Boot] dosboot_Init: GO GO GO!"));
 
     ExpansionBase = (APTR)TaggedOpenLibrary(TAGGEDOPEN_EXPANSION);
 
-    (bugtest(DOSBootBase, "[Strap] ExpansionBase 0x%p", ExpansionBase));
+    (dosboot_Log2("[Strap] ExpansionBase 0x%p", ExpansionBase));
     if( ExpansionBase == NULL )
     {
-        (bugtest(DOSBootBase, "[Boot] Could not open expansion.library, something's wrong!"));
+        (dosboot_Log2("[Boot] Could not open expansion.library, something's wrong!"));
         Alert(AT_DeadEnd | AG_OpenLib | AN_BootStrap | AO_ExpansionLib);
     }
 
@@ -171,13 +175,13 @@ int dosboot_Init(LIBBASETYPEPTR DOSBootBase)
                 {
                     ULONG delay = atoi(&node->ln_Name[10]);
 
-                    (bugtest(DOSBootBase, "[Boot] delay of %d seconds requested.", delay));
+                    (dosboot_Log2("[Boot] delay of %d seconds requested.", delay));
                     if (delay)
                         bootDelay(DOSBootBase, delay * 50);
                 }
                 else if (0 == stricmp(node->ln_Name, "bootmenu"))
                 {
-                    (bugtest(DOSBootBase, "[BootMenu] bootmenu_Init: Forced with bootloader argument"));
+                    (dosboot_Log2("[BootMenu] bootmenu_Init: Forced with bootloader argument"));
                     WantBootMenu = TRUE;
                 }
                 /*
@@ -199,7 +203,7 @@ int dosboot_Init(LIBBASETYPEPTR DOSBootBase)
                 else if (0 == stricmp(node->ln_Name, "econsole"))
                 {
                 	DOSBootBase->db_BootFlags |= BF_EMERGENCY_CONSOLE;
-                    (bugtest(DOSBootBase, "[Boot] Emergency console selected"));
+                    (dosboot_Log2("[Boot] Emergency console selected"));
                 }
             }
             IntExpBase(ExpansionBase)->BootFlags = DOSBootBase->db_BootFlags;
@@ -288,7 +292,6 @@ int dosboot_Init(LIBBASETYPEPTR DOSBootBase)
 
     /* We want to be able to find ourselves in RTF_AFTERDOS */
     //DOSBootBase->bm_Screen = NULL;
-    AddResource(&DOSBootBase->db_Node);
 
     /* Attempt to boot until we succeed */
     for (;;)
@@ -298,9 +301,9 @@ int dosboot_Init(LIBBASETYPEPTR DOSBootBase)
         //if (!DOSBootBase->bm_Screen)
         //	DOSBootBase->bm_Screen = NoBootMediaScreen(DOSBootBase);
 
-        bugtest(DOSBootBase, "[Boot] No bootable disk was found.");
-        bugtest(DOSBootBase, "[Boot] Please insert a bootable disk in any drive.");
-        bugtest(DOSBootBase, "[Boot] Retrying in 3 seconds...");
+        dosboot_Log2("[Boot] No bootable disk was found.");
+        dosboot_Log2("[Boot] Please insert a bootable disk in any drive.");
+        dosboot_Log2("[Boot] Retrying in 3 seconds...");
 
         for (t = 0; t < 150; t += DOSBootBase->delayTicks)
         {

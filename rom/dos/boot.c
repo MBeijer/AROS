@@ -20,6 +20,7 @@
 #include <libraries/expansionbase.h>
 #include <proto/exec.h>
 #include <proto/dos.h>
+#include <resources/dosboot.h>
 
 #include "dos_intern.h"
 #include "../dosboot/bootflags.h"
@@ -71,21 +72,21 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
 {
     BPTR cis = BNULL;
 
-    /*  We have been created as a process by DOS, we should now
-        try and boot the system. */
+	/*  We have been created as a process by DOS, we should now
+		try and boot the system. */
 
-    D(
-        bug("[DOS] %s: ** starting generic boot sequence\n", __func__);
-        bug("[DOS] %s: BootFlags 0x%08X Flags 0x%02X\n", __func__, BootFlags, Flags);
-        bug("[DOS] %s: DOSBase @ 0x%p\n", __func__, DOSBase);
-      )
+    //D(
+	dosboot_Log2("[DOS] %s: ** starting generic boot sequence", __func__);
+	dosboot_Log2("[DOS] %s: BootFlags 0x%08X Flags 0x%02X", __func__, BootFlags, Flags);
+	dosboot_Log2("[DOS] %s: DOSBase @ 0x%p", __func__, DOSBase);
+      //)
 
     /* m68000 uses this to get the default colors and
      * cursors for Workbench
      */
     load_system_configuration(DOSBase);
 
-    D(bug("[DOS] %s: system config loaded\n", __func__);)
+    (dosboot_Log2("[DOS] %s: system config loaded", __func__));
 
     /*
      * If needed, run the display drivers loader.
@@ -98,7 +99,7 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
         /* Check that it exists first... */
         BPTR seg;
 
-        D(bug("[DOS] %s: initialising displays\n", __func__);)
+        (dosboot_Log2("[DOS] %s: initialising displays", __func__));
 
         if ((seg = LoadSeg("C:AROSMonDrvs")) != BNULL)
         {
@@ -110,11 +111,11 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
              * Their absence causes ReadArgs() crash.
              */
             if (BootFlags & BF_NO_COMPOSITION)
-                args = "NOCOMPOSITION\n";
+                args = "NOCOMPOSITION";
             else if (BootFlags & BF_NO_DISPLAY_DRIVERS)
-                args = "ONLYCOMPOSITION\n";
+                args = "ONLYCOMPOSITION";
 
-            D(bug("[DOS] %s: Running AROSMonDrvs %s\n", __func__, args);)
+            (dosboot_Log2("[DOS] %s: Running AROSMonDrvs %s", __func__, args));
 
             /* RunCommand needs a valid Input() handle
              * for passing in its arguments.
@@ -130,10 +131,10 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
         }
     }
 
-    D(bug("[DOS] %s: preparing console\n", __func__);)
+    (dosboot_Log2("[DOS] %s: preparing console", __func__));
 
     if (BootFlags & BF_EMERGENCY_CONSOLE) {
-        D(bug("[DOS] %s:     (emergency console)\n", __func__);)
+        (dosboot_Log2("[DOS] %s:     (emergency console)", __func__));
         BootFlags |= BF_NO_STARTUP_SEQUENCE;
         cis = Open("ECON:", MODE_OLDFILE);
     }
@@ -150,7 +151,7 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
         BPTR cos = OpenFromLock(DupLockFromFH(cis));
         BYTE *C = generate_banner();
 
-        D(bug("[DOS] %s:  handle @ 0x%p (0x%p)\n", __func__, cis, cos);)
+        (dosboot_Log2("[DOS] %s:  handle @ 0x%p (0x%p)", __func__, cis, cos));
 
         if (cos) {
             BPTR cas = BNULL;
@@ -168,7 +169,7 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
                 FPuts(cos, C);
             }
 
-            D(bug("[DOS] %s: initialising CLI\n", __func__);)
+            (dosboot_Log2("[DOS] %s: initialising CLI", __func__));
 
             if (SystemTags(NULL,
                            NP_Name, "Initial CLI",
@@ -178,7 +179,7 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
                            SYS_Output, cos,
                            SYS_ScriptInput, cas,
                            TAG_END) == -1) {
-                D(bug("[DOS] %s:  .. failed!\n", __func__);)
+                (dosboot_Log2("[DOS] %s:  .. failed!", __func__));
                 Alert(AT_DeadEnd | AN_BootStrap);
             }
 
@@ -198,7 +199,7 @@ void __dos_Boot(struct DosLibrary *DOSBase, ULONG BootFlags, UBYTE Flags)
         }
         FreeVec(C);
     } else {
-        D(bug("[DOS] %s:  .. failed!\n", __func__);)
+        (dosboot_Log2("[DOS] %s:  .. failed!", __func__));
         Alert(AN_NoWindow);
     }
 }

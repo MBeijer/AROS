@@ -3,7 +3,7 @@ include $(SRCDIR)/config/aros.cfg
 
 NOMEDIA_IMAGE := nomedia
 
-FILES := dosboot_init bootstrap bootscan \
+FILES := dosboot_init bootlog bootstrap bootscan \
          menu bootscreen bootanim cleanup
 
 #MM- kernel-dosboot-includes : kernel-bootloader-includes

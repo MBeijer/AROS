@@ -8,6 +8,7 @@
 #include <exec/resident.h>
 #include <libraries/expansionbase.h>
 #include <proto/exec.h>
+#include <resources/dosboot.h>
 
 #include LC_LIBDEFS_FILE
 
@@ -42,15 +43,16 @@ AROS_UFH3(static APTR, dosboot_Cleanup,
 {
     AROS_USERFUNC_INIT
 
+	return NULL;
     struct DOSBootBase *base = OpenResource("dosboot.resource");
-    
+
     if (!base)
     {
     	/* ??? What ??? */
     	return NULL;
     }
 
-    D(bug("[dosboot cleanup] Boot screen 0x%p\n", base->bm_Screen));
+    (dosboot_Log2("[dosboot cleanup] Boot screen 0x%p\n", base->bm_Screen));
     if (base->bm_Screen)
     {
     	/* Close "No boot media" screen. This is actually what we are here for. */

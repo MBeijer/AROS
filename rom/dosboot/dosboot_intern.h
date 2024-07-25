@@ -73,7 +73,6 @@ void anim_Animate(struct Screen *scr, struct DOSBootBase *DOSBootBase);
 /* Check to see if the bootnode is bootable */
 #include <libraries/expansion.h>
 #include <libraries/expansionbase.h>
-extern void bugtest(struct DOSBootBase* DOSBootBase, const char *fmt, ...);
 static inline BOOL IsBootableNode(struct BootNode *bootNode)
 {
     return ((bootNode->bn_Node.ln_Type == NT_BOOTNODE) &&

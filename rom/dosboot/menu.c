@@ -18,6 +18,7 @@
 #include <proto/gadtools.h>
 #include <proto/expansion.h>
 #include <proto/oop.h>
+#include <resources/dosboot.h>
 
 #include <devices/keyboard.h>
 #include <devices/rawkeycodes.h>
@@ -149,29 +150,6 @@ static void norm_text(LIBBASETYPEPTR DOSBootBase, BYTE pen, WORD x, WORD y, cons
 	vsprintf(buf, fmt, args);
 	va_end(args);
 	PrintIText(win->RPort, &it, x, y);
-}
-
-
-void bugtest(LIBBASETYPEPTR DOSBootBase, const char *fmt, ...) {
-
-	if (DOSBootBase != NULL) {
-		const int lineHeight = 8;
-		int currentY = (DOSBootBase->debug_pos++)*lineHeight;
-		va_list args;
-		char buf[256];
-		va_start(args, fmt);
-		vsprintf(buf, fmt, args);
-		va_end(args);
-		struct Window *win = DOSBootBase->bm_Window;
-		if (currentY + lineHeight >= win->Height) {
-			// Scroll the content up
-
-			ScrollRaster(win->RPort, 0, lineHeight, 0, 0, win->Width - 1, win->Height - 1);
-			currentY -= lineHeight;
-			DOSBootBase->debug_pos--;
-		}
-		norm_text(DOSBootBase, 2, 1, currentY, buf);
-	}
 }
 
 static void centertext(LIBBASETYPEPTR DOSBootBase, BYTE pen, WORD y, const char *text)
@@ -781,7 +759,7 @@ static WORD initWindow(LIBBASETYPEPTR DOSBootBase, struct BootConfig *bcfg, WORD
     firstGadget = CreateContext(&gadlist);
 
 
-	if (populateGadgets(DOSBootBase, firstGadget, page))
+	//if (populateGadgets(DOSBootBase, firstGadget, page))
     {
         struct NewWindow nw =
         {
@@ -807,8 +785,8 @@ static WORD initWindow(LIBBASETYPEPTR DOSBootBase, struct BootConfig *bcfg, WORD
         	struct Window *win = DOSBootBase->bm_Window;
         	SetRast(win->RPort, 1);
         	SetBPen(win->RPort, 1);
-            bugtest(DOSBootBase, __DISTRONAME__ " (" __DISTROVERSION__ ", " __DISTRODATE__ ")", DOSBootBase->bm_Window);
-            bugtest(DOSBootBase, "------------------------------------", DOSBootBase->bm_Window);
+            dosboot_Log2(__DISTRONAME__ " (" __DISTROVERSION__ ", " __DISTRODATE__ ")", DOSBootBase->bm_Window);
+	        dosboot_Log2("------------------------------------", DOSBootBase->bm_Window);
             //bugtest(DOSBootBase, "[BootMenu] initScreen: Window opened @ %p\n", DOSBootBase->bm_Window);
             //bugtest(DOSBootBase, "[BootMenu] initScreen: Window RastPort @ %p\n", DOSBootBase->bm_Window->RPort);
             //bugtest(DOSBootBase, "[BootMenu] initScreen: Window UserPort @ %p\n", DOSBootBase->bm_Window->UserPort);

@@ -31,6 +31,7 @@
 #include <proto/expansion.h>
 #include <proto/partition.h>
 #include <proto/bootloader.h>
+#include <resources/dosboot.h>
 #include <clib/alib_protos.h>
 
 #include LC_LIBDEFS_FILE
@@ -77,7 +78,7 @@ static VOID AddPartitionVolume(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase 
     BOOL appended, changed;
     struct Node *fsnode;
 
-    (bugtest(DOSBootBase, "[Boot] AddPartitionVolume"));
+    (dosboot_Log2("[Boot] AddPartitionVolume"));
     GetPartitionTableAttrsTags(table, PTT_TYPE, &pttype, TAG_DONE);
 
     attrs = QueryPartitionAttrs(table);
@@ -86,7 +87,7 @@ static VOID AddPartitionVolume(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase 
 
     if (attrs->attribute != TAG_DONE)
     {
-        (bugtest(DOSBootBase, "[Boot] RDB/GPT partition"));
+        (dosboot_Log2("[Boot] RDB/GPT partition"));
 
         /* partition has a name => RDB/GPT partition */
         tags[0] = PT_NAME;
@@ -100,17 +101,17 @@ static VOID AddPartitionVolume(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase 
         tags[8] = TAG_DONE;
         GetPartitionAttrs(pn, (struct TagItem *)tags);
 
-        (bugtest(DOSBootBase, "[Boot] Partition name: %s bootable: %d automount: %d", name, bootable, automount));
+        (dosboot_Log2("[Boot] Partition name: %s bootable: %d automount: %d", name, bootable, automount));
 
         if (automount == FALSE)
         {
-        	(bugtest(DOSBootBase, "[Boot] Skipping %s so NOMOUNT is SET", name));
+        	(dosboot_Log2("[Boot] Skipping %s so NOMOUNT is SET", name));
         	return;
         }
     }
     else
     {
-        (bugtest(DOSBootBase, "[Boot] MBR/EBR partition"));
+        (dosboot_Log2("[Boot] MBR/EBR partition"));
 
         /* partition doesn't have a name => MBR/EBR partition */
         tags[0] = PT_POSITION;
@@ -147,7 +148,7 @@ static VOID AddPartitionVolume(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase 
         name[i++] = '0' + (UBYTE)(ppos % 10);
         name[i] = '\0';
 
-        (bugtest(DOSBootBase, "[Boot] Partition name: %s", name));
+        (dosboot_Log2("[Boot] Partition name: %s", name));
     }
 
     if ((pp[4 + DE_TABLESIZE] < DE_DOSTYPE) || (pp[4 + DE_DOSTYPE] == 0))
@@ -159,7 +160,7 @@ static VOID AddPartitionVolume(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase 
     	 * Here we ignore partitions with DosType == 0 and won't enter them into
     	 * mountlist.
     	 */
-    	(bugtest(DOSBootBase, "[Boot] Unknown DosType for %s, skipping partition"));
+    	(dosboot_Log2("[Boot] Unknown DosType for %s, skipping partition"));
     	return;
     }
 
@@ -202,7 +203,7 @@ static VOID AddPartitionVolume(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase 
     blockspercyl = pp[4 + DE_BLKSPERTRACK] * pp[4 + DE_NUMHEADS];
     if (i % blockspercyl != 0)
     {
-        (bugtest(DOSBootBase, "[Boot] Start block of subtable not on cylinder boundary: "
+        (dosboot_Log2("[Boot] Start block of subtable not on cylinder boundary: "
             "%ld (Blocks per Cylinder = %ld)", i, blockspercyl));
         return;
     }
@@ -235,14 +236,14 @@ static VOID AddPartitionVolume(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase 
 
     fsnode = FindFileSystem(table, FST_ID, pp[4 + DE_DOSTYPE], TAG_DONE);
     if (fsnode) {
-        (bugtest(DOSBootBase, "[Boot] Found on-disk filesystem 0x%08x", pp[4 + DE_DOSTYPE]));
+        (dosboot_Log2("[Boot] Found on-disk filesystem 0x%08x", pp[4 + DE_DOSTYPE]));
         AddBootFileSystem(fsnode);
     }
 
     devnode = MakeDosNode(pp);
     if (devnode != NULL) {
         AddBootNode(bootable ? pp[4 + DE_BOOTPRI] : -128, ADNF_STARTPROC, devnode, NULL);
-        (bugtest(DOSBootBase, "[Boot] AddBootNode(%b, 0, 0x%p, NULL)",  devnode->dn_Name, pp[4 + DE_DOSTYPE]));
+        (dosboot_Log2("[Boot] AddBootNode(%b, 0, 0x%p, NULL)",  devnode->dn_Name, pp[4 + DE_DOSTYPE]));
         return;
     }
 }
@@ -278,8 +279,8 @@ static VOID CheckPartitions(LIBBASETYPEPTR DOSBootBase, struct ExpansionBase *Ex
     struct DeviceNode *dn = bn->bn_DeviceNode;
     BOOL res = FALSE;
 
-    (bugtest(DOSBootBase, "CheckPartitions('%b') handler seglist = %x, handler = %s", dn->dn_Name,
-            dn->dn_SegList, AROS_BSTR_ADDR(dn->dn_Handler)));
+    dosboot_Log2("[Boot] CheckPartitions('%b') handler seglist = %x, handler = %s", dn->dn_Name,
+            dn->dn_SegList, AROS_BSTR_ADDR(dn->dn_Handler));
 
     /* Examples:
      * ata.device registers a HDx device describing whole disk with no handler name and no seglist
