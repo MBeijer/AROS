@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.20)
+
+if(NOT DEFINED GENCTBL_EXE)
+  message(FATAL_ERROR "GENCTBL_EXE not provided")
+endif()
+if(NOT DEFINED UCD_DIR)
+  message(FATAL_ERROR "UCD_DIR not provided")
+endif()
+if(NOT DEFINED OUT_DIR)
+  message(FATAL_ERROR "OUT_DIR not provided")
+endif()
+if(NOT EXISTS "${UCD_DIR}/UnicodeData.txt")
+  message(FATAL_ERROR "UnicodeData.txt not found at ${UCD_DIR}/UnicodeData.txt")
+endif()
+
+file(MAKE_DIRECTORY "${OUT_DIR}")
+set(_langs "@_aros_ctbl_languages_pipe@")
+string(REPLACE "|" ";" _langs "${_langs}")
+
+foreach(_locale IN LISTS _langs)
+  execute_process(
+    COMMAND "${GENCTBL_EXE}" "${UCD_DIR}" "${OUT_DIR}" "${_locale}"
+    RESULT_VARIABLE _rv
+  )
+  if(NOT _rv EQUAL 0)
+    message(FATAL_ERROR "genctbl failed for locale ${_locale} with code ${_rv}")
+  endif()
+endforeach()

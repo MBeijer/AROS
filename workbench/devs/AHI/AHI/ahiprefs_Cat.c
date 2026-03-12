@@ -1,6 +1,6 @@
 /****************************************************************
    This file was created automatically by `FlexCat 2.19'
-   from "/ssd/deadwood/repo-github-dd-core/AROS/workbench/devs/AHI/AHI/ahiprefs.cd".
+   from "/home/marlon/nfs/storage/projects/amiga/aros/workbench/devs/AHI/AHI/ahiprefs.cd".
 
    Do NOT edit by hand!
 ****************************************************************/

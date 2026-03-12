@@ -1,0 +1,537 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(AROS LANGUAGES C CXX)
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+  message(FATAL_ERROR "In-source builds are not supported. Use: cmake -S . -B <build-dir>")
+endif()
+
+set(AROS_TARGET "linux-x86_64" CACHE STRING "AROS configure target (for example linux-x86_64, amiga-m68k)")
+set(_aros_configure_args_default "$ENV{EXTRA_CONFIGURE_OPTS}")
+set(AROS_CONFIGURE_ARGS "${_aros_configure_args_default}" CACHE STRING "Extra arguments passed to ./configure (defaults to EXTRA_CONFIGURE_OPTS env when present)")
+set(_aros_make_jobs_default "$ENV{MAKE_JOBS}")
+set(AROS_MAKE_JOBS "${_aros_make_jobs_default}" CACHE STRING "Parallel jobs passed to GNU make (-j). Empty uses make default")
+set(AROS_TOOLCHAIN_INSTALL_DIR "" CACHE PATH "Passed to configure as --with-aros-toolchain-install=DIR when set")
+set(AROS_PORTS_SOURCES_DIR "" CACHE PATH "Passed to configure as --with-portssources=DIR when set")
+set(AROS_GNU_MAKE_PROGRAM "" CACHE FILEPATH "GNU make executable used for AROS makefile targets; auto-detected when empty")
+option(AROS_ENABLE_LEGACY_PIPELINE "Expose top-level AROS build targets through CMake" ON)
+option(AROS_BUILD_METAMAKE "Build MetaMake (mmake) with CMake" ON)
+option(AROS_BUILD_ZOPFLI "Build tools/zopfli with CMake" ON)
+option(AROS_BUILD_UDIS86 "Build arch/all-pc/udis86 with CMake" ON)
+option(AROS_BUILD_GENMF "Build tools/genmf with CMake" ON)
+option(AROS_BUILD_GENMODULE "Build tools/genmodule with CMake" ON)
+option(AROS_BUILD_SETREV "Build tools/setrev with CMake" ON)
+option(AROS_BUILD_ELF2HUNK "Build tools/elf2hunk with CMake" ON)
+option(AROS_BUILD_ILBMTOC "Build tools/ilbmtoc with CMake" ON)
+option(AROS_BUILD_ARCHTOOL "Build tools/archtools with CMake" ON)
+option(AROS_BUILD_ILBMTOICON "Build tools/ilbmtoicon with CMake" ON)
+option(AROS_BUILD_DTDESC "Build tools/dtdesc with CMake" ON)
+option(AROS_BUILD_GENCTBL "Build tools/genctbl with CMake" ON)
+option(AROS_BUILD_MKAMIKEYMAP "Build tools/mkamikeymap with CMake" ON)
+option(AROS_BUILD_FD2PRAGMA "Build tools/fd2pragma with CMake" ON)
+option(AROS_BUILD_ADFLIB "Build tools/ADFlib with CMake" ON)
+option(AROS_BUILD_FLEXCAT "Build tools/flexcat with CMake" ON)
+option(AROS_BUILD_LHA "Build tools/lha with CMake" ON)
+
+include("${CMAKE_SOURCE_DIR}/cmake/AROSModule.cmake")
+# START LEGACY: compatibility bridge options for legacy MetaMake/make flow.
+set(AROS_LEGACY_BUILD_DIR "${CMAKE_BINARY_DIR}/legacy-main" CACHE PATH "Build directory used for legacy configure+make wrapper targets")
+option(AROS_LEGACY_USE_NATIVE_MMAKE "Use CMake-built mmake binary when running legacy GNU make targets" OFF)
+option(AROS_LEGACY_SKIP_CROSSTOOLS_MMAKE "Skip legacy make-driven crosstools rebuild in wrapper targets when crosstools dependencies are provided by CMake" OFF)
+option(AROS_LEGACY_REQUIRE_CROSSTOOLS "Require aros-crosstools-toolchain dependency for legacy make-wrapper targets" ON)
+option(AROS_LEGACY_REQUIRE_CROSSTOOLS_RUNTIME "Require runtime-complete crosstools for legacy wrappers/parity checks" ON)
+option(AROS_LEGACY_REUSE_EXISTING_CROSSTOOLS "Skip wrapper crosstools dependency when an existing toolchain install already provides the required target compiler" ON)
+option(AROS_LEGACY_FORCE_MMAKE_CONFIG "Force MMAKE_CONFIG to the active build's mmake.config for legacy wrapper invocations" ON)
+option(AROS_ENABLE_COEXIST_COMPARE "Build and compare native-CMake and legacy MetaMake tool outputs" ON)
+option(AROS_COEXIST_STRICT_COMPARE "Fail coexist compare target when any artifact differs" OFF)
+option(AROS_ENABLE_OUTPUT_PARITY_CHECK "Enable full output-tree parity comparison target against a legacy reference build" ON)
+option(AROS_OUTPUT_PARITY_STRICT "Fail output parity target on any file mismatch" ON)
+option(AROS_PARITY_LEGACY_SERIAL_MAKE "Run legacy-reference parity make step with -j1 for deterministic/stable output generation" ON)
+# END LEGACY
+
+add_subdirectory(tools)
+
+separate_arguments(_aros_configure_args NATIVE_COMMAND "${AROS_CONFIGURE_ARGS}")
+
+if(AROS_GNU_MAKE_PROGRAM)
+  set(_aros_make_program "${AROS_GNU_MAKE_PROGRAM}")
+else()
+  find_program(_aros_make_program NAMES gmake make REQUIRED)
+endif()
+
+set(_aros_effective_toolchain_install_dir "${AROS_TOOLCHAIN_INSTALL_DIR}")
+if(NOT _aros_effective_toolchain_install_dir AND AROS_CROSSTOOLS_NATIVE AND AROS_CROSSTOOLS_INSTALL_DIR)
+  set(_aros_effective_toolchain_install_dir "${AROS_CROSSTOOLS_INSTALL_DIR}")
+endif()
+
+function(_aros_dir_has_target_gcc _dir _triplet _out_var)
+  set(_has FALSE)
+  if(_dir AND EXISTS "${_dir}/bin/${_triplet}-gcc")
+    set(_has TRUE)
+  elseif(_dir AND EXISTS "${_dir}/${_triplet}-gcc")
+    set(_has TRUE)
+  endif()
+
+  if(_has AND AROS_LEGACY_REQUIRE_CROSSTOOLS_RUNTIME)
+    set(_has_runtime FALSE)
+    set(_runtime_candidates
+      "${_dir}/lib/gcc/${_triplet}/${AROS_GCC_VERSION}/libstdc++.a"
+      "${_dir}/lib/gcc/${_triplet}/${AROS_GCC_VERSION}/libstdc++.so"
+      "${_dir}/${_triplet}/lib/libstdc++.a"
+      "${_dir}/${_triplet}/lib/libstdc++.so"
+      "${_dir}/${_triplet}/lib64/libstdc++.a"
+      "${_dir}/${_triplet}/lib64/libstdc++.so"
+    )
+    foreach(_runtime_path IN LISTS _runtime_candidates)
+      if(EXISTS "${_runtime_path}")
+        set(_has_runtime TRUE)
+        break()
+      endif()
+    endforeach()
+    if(NOT _has_runtime)
+      set(_has FALSE)
+    endif()
+  endif()
+
+  set(${_out_var} "${_has}" PARENT_SCOPE)
+endfunction()
+
+set(_aros_reusable_toolchain_dir "")
+if(AROS_CROSSTOOLS_TARGET_CPU)
+  set(_aros_toolchain_triplet "${AROS_CROSSTOOLS_TARGET_CPU}-aros")
+  set(_aros_toolchain_candidates)
+  if(_aros_effective_toolchain_install_dir)
+    list(APPEND _aros_toolchain_candidates "${_aros_effective_toolchain_install_dir}")
+  endif()
+  list(APPEND _aros_toolchain_candidates
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/tools/crosstools"
+    "${CMAKE_BINARY_DIR}/bin/${AROS_TARGET}/tools/crosstools"
+  )
+  list(REMOVE_DUPLICATES _aros_toolchain_candidates)
+  foreach(_aros_toolchain_candidate IN LISTS _aros_toolchain_candidates)
+    _aros_dir_has_target_gcc("${_aros_toolchain_candidate}" "${_aros_toolchain_triplet}" _aros_candidate_has_gcc)
+    if(_aros_candidate_has_gcc)
+      set(_aros_reusable_toolchain_dir "${_aros_toolchain_candidate}")
+      break()
+    endif()
+  endforeach()
+endif()
+
+if(_aros_reusable_toolchain_dir
+   AND (AROS_CROSSTOOLS_NATIVE OR AROS_TOOLCHAIN_INSTALL_DIR)
+   AND NOT _aros_effective_toolchain_install_dir STREQUAL _aros_reusable_toolchain_dir)
+  message(STATUS "Using reusable existing crosstools install: ${_aros_reusable_toolchain_dir}")
+  set(_aros_effective_toolchain_install_dir "${_aros_reusable_toolchain_dir}")
+endif()
+
+set(_aros_native_toolchain_install_dir "${AROS_TOOLCHAIN_INSTALL_DIR}")
+if(NOT _aros_native_toolchain_install_dir AND AROS_CROSSTOOLS_NATIVE AND AROS_CROSSTOOLS_INSTALL_DIR)
+  set(_aros_native_toolchain_install_dir "${AROS_CROSSTOOLS_INSTALL_DIR}")
+  if(AROS_CROSSTOOLS_TARGET_CPU)
+    _aros_dir_has_target_gcc(
+      "${_aros_native_toolchain_install_dir}"
+      "${AROS_CROSSTOOLS_TARGET_CPU}-aros"
+      _aros_native_toolchain_has_gcc
+    )
+    if(NOT _aros_native_toolchain_has_gcc AND _aros_reusable_toolchain_dir)
+      set(_aros_native_toolchain_install_dir "${_aros_reusable_toolchain_dir}")
+    endif()
+  endif()
+endif()
+if(NOT _aros_native_toolchain_install_dir AND _aros_reusable_toolchain_dir)
+  set(_aros_native_toolchain_install_dir "${_aros_reusable_toolchain_dir}")
+endif()
+set(AROS_NATIVE_TOOLCHAIN_INSTALL_DIR "${_aros_native_toolchain_install_dir}" CACHE INTERNAL
+  "Effective toolchain prefix used by CMake-native build stages")
+
+set(_aros_configure_cli_args "--target=${AROS_TARGET}")
+if(_aros_effective_toolchain_install_dir)
+  list(APPEND _aros_configure_cli_args "--with-aros-toolchain-install=${_aros_effective_toolchain_install_dir}")
+endif()
+if(AROS_PORTS_SOURCES_DIR)
+  list(APPEND _aros_configure_cli_args "--with-portssources=${AROS_PORTS_SOURCES_DIR}")
+endif()
+list(APPEND _aros_configure_cli_args ${_aros_configure_args})
+
+string(REPLACE ";" "\n" _aros_configure_cli_args_text "${_aros_configure_cli_args}")
+set(_aros_configure_args_file "${CMAKE_BINARY_DIR}/.cmake-aros-configure-args.txt")
+file(GENERATE OUTPUT "${_aros_configure_args_file}" CONTENT "${_aros_configure_cli_args_text}\n")
+
+set(_aros_make_job_args)
+if(AROS_MAKE_JOBS)
+  list(APPEND _aros_make_job_args -j "${AROS_MAKE_JOBS}")
+endif()
+
+set(_aros_make_var_args)
+set(_aros_make_common_deps)
+set(_aros_legacy_crosstools_dep)
+set(_aros_legacy_reuse_existing_crosstools FALSE)
+if(AROS_LEGACY_USE_NATIVE_MMAKE AND TARGET metamake)
+  list(APPEND _aros_make_var_args "MMAKE=$<TARGET_FILE:metamake>")
+  list(APPEND _aros_make_common_deps metamake)
+endif()
+if(AROS_LEGACY_SKIP_CROSSTOOLS_MMAKE AND AROS_LEGACY_REQUIRE_CROSSTOOLS)
+  list(APPEND _aros_make_var_args "CROSSTOOLS_TARGET=")
+endif()
+if(AROS_LEGACY_FORCE_MMAKE_CONFIG)
+  list(APPEND _aros_make_var_args "MMAKE_CONFIG=${AROS_LEGACY_BUILD_DIR}/mmake.config")
+endif()
+if(AROS_LEGACY_REQUIRE_CROSSTOOLS)
+  # START LEGACY: avoid rebuilding crosstools when a compatible install already exists.
+  if(AROS_LEGACY_REUSE_EXISTING_CROSSTOOLS)
+    if(_aros_reusable_toolchain_dir)
+      set(_aros_legacy_reuse_existing_crosstools TRUE)
+    elseif(AROS_CROSSTOOLS_TARGET_CPU AND _aros_effective_toolchain_install_dir)
+      set(_aros_legacy_triplet "${AROS_CROSSTOOLS_TARGET_CPU}-aros")
+      _aros_dir_has_target_gcc("${_aros_effective_toolchain_install_dir}" "${_aros_legacy_triplet}" _aros_legacy_reuse_existing_crosstools)
+    endif()
+  endif()
+  # END LEGACY
+
+  if(_aros_legacy_reuse_existing_crosstools)
+    message(STATUS "Reusing existing crosstools install for legacy wrappers: ${_aros_effective_toolchain_install_dir}")
+  elseif(AROS_LEGACY_REQUIRE_CROSSTOOLS_RUNTIME)
+    set(_aros_legacy_crosstools_dep aros-crosstools)
+  else()
+    set(_aros_legacy_crosstools_dep aros-crosstools-toolchain)
+  endif()
+endif()
+
+set(AROS_CONFIGURE_STAMP "${CMAKE_BINARY_DIR}/.cmake-aros-configured.stamp")
+set(AROS_CONFIGURE_TARGET_CFG "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg")
+set(AROS_CONFIGURE_MMAKE_CONFIG "${AROS_LEGACY_BUILD_DIR}/mmake.config")
+set(_aros_append_mmake_ignoredirs_script "${CMAKE_SOURCE_DIR}/cmake/append_mmake_ignoredirs.cmake")
+
+add_custom_command(
+  OUTPUT "${AROS_CONFIGURE_STAMP}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${AROS_LEGACY_BUILD_DIR}"
+  COMMAND "${CMAKE_COMMAND}" -E chdir "${AROS_LEGACY_BUILD_DIR}"
+          "${CMAKE_SOURCE_DIR}/configure" ${_aros_configure_cli_args}
+  # START LEGACY: normalize mmake ignoredir list to avoid scanning stale CMake build trees.
+  COMMAND "${CMAKE_COMMAND}"
+          -DMMAKE_CONFIG_PATH=${AROS_LEGACY_BUILD_DIR}/mmake.config
+          -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DAROS_ACTIVE_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+          -P "${_aros_append_mmake_ignoredirs_script}"
+  # END LEGACY
+  COMMAND "${CMAKE_COMMAND}" -E touch "${AROS_CONFIGURE_STAMP}"
+  DEPENDS
+    "${CMAKE_SOURCE_DIR}/configure"
+    "${CMAKE_SOURCE_DIR}/configure.in"
+    "${CMAKE_SOURCE_DIR}/Makefile.in"
+    "${_aros_append_mmake_ignoredirs_script}"
+    "${_aros_configure_args_file}"
+  BYPRODUCTS
+    "${AROS_LEGACY_BUILD_DIR}/Makefile"
+    "${AROS_LEGACY_BUILD_DIR}/config.status"
+    "${AROS_CONFIGURE_MMAKE_CONFIG}"
+    "${AROS_CONFIGURE_TARGET_CFG}"
+  COMMENT "Configuring AROS in ${AROS_LEGACY_BUILD_DIR} (target: ${AROS_TARGET})"
+  VERBATIM
+)
+
+add_custom_target(
+  aros-configure
+  DEPENDS
+    "${AROS_CONFIGURE_STAMP}"
+    "${AROS_CONFIGURE_MMAKE_CONFIG}"
+    "${AROS_CONFIGURE_TARGET_CFG}"
+)
+
+set(AROS_NATIVE_INCLUDE_DIR "${CMAKE_BINARY_DIR}/native-includes")
+set(AROS_NATIVE_OUTPUT_ROOT "${CMAKE_BINARY_DIR}/bin/${AROS_TARGET}")
+set(AROS_NATIVE_SYSTEM_DIR "${AROS_NATIVE_OUTPUT_ROOT}/AROS")
+set(AROS_NATIVE_DEVELOPER_DIR "${AROS_NATIVE_SYSTEM_DIR}/Development")
+set(AROS_NATIVE_PUBLIC_LIB_DIR "${AROS_NATIVE_DEVELOPER_DIR}/lib")
+set(AROS_NATIVE_BUILD_SDKS_DIR "${AROS_NATIVE_OUTPUT_ROOT}/gen/buildsdks")
+set(AROS_NATIVE_PRIVATE_DEVELOPER_DIR "${AROS_NATIVE_BUILD_SDKS_DIR}/private")
+set(AROS_NATIVE_PRIVATE_LIB_DIR "${AROS_NATIVE_PRIVATE_DEVELOPER_DIR}/lib")
+set(AROS_NATIVE_REL_LIB_DIR "${AROS_NATIVE_BUILD_SDKS_DIR}/rel/lib")
+set(_aros_native_include_deps aros-configure)
+set(_aros_native_target_cc "")
+if(AROS_NATIVE_TOOLCHAIN_INSTALL_DIR AND AROS_CROSSTOOLS_TARGET_CPU)
+  foreach(_candidate IN ITEMS
+      "${AROS_NATIVE_TOOLCHAIN_INSTALL_DIR}/bin/${AROS_CROSSTOOLS_TARGET_CPU}-aros-gcc"
+      "${AROS_NATIVE_TOOLCHAIN_INSTALL_DIR}/${AROS_CROSSTOOLS_TARGET_CPU}-aros-gcc")
+    if(EXISTS "${_candidate}")
+      set(_aros_native_target_cc "${_candidate}")
+      break()
+    endif()
+  endforeach()
+endif()
+if(TARGET aros-crosstools-toolchain AND NOT _aros_native_target_cc)
+  list(APPEND _aros_native_include_deps aros-crosstools-toolchain)
+endif()
+file(GLOB_RECURSE _aros_native_include_inputs CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/compiler/include/*"
+  "${CMAKE_SOURCE_DIR}/compiler/arossupport/include/*"
+  "${CMAKE_SOURCE_DIR}/compiler/autoinit/*.h"
+  "${CMAKE_SOURCE_DIR}/compiler/startup/*"
+  "${CMAKE_SOURCE_DIR}/compiler/dynmodule/include/*"
+  "${CMAKE_SOURCE_DIR}/compiler/pthread/pthread.h"
+  "${CMAKE_SOURCE_DIR}/compiler/pthread/sched.h"
+  "${CMAKE_SOURCE_DIR}/compiler/pthread/semaphore.h"
+  "${CMAKE_SOURCE_DIR}/compiler/crt/include/*"
+  "${CMAKE_SOURCE_DIR}/compiler/crt/posixc/include/*"
+  "${CMAKE_SOURCE_DIR}/compiler/crt/stdc/include/*"
+  "${CMAKE_SOURCE_DIR}/rom/*/include/*"
+  "${CMAKE_SOURCE_DIR}/arch/*/include/*"
+)
+set(AROS_NATIVE_INCLUDES_STAMP "${CMAKE_BINARY_DIR}/.cmake-aros-native-includes.stamp")
+add_custom_command(
+  OUTPUT "${AROS_NATIVE_INCLUDES_STAMP}"
+  COMMAND "${CMAKE_COMMAND}"
+          -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
+          -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+          -DAROS_TARGET=${AROS_TARGET}
+          -DAROS_NATIVE_INCLUDE_DIR=${AROS_NATIVE_INCLUDE_DIR}
+          -DAROS_HOST_CC=${CMAKE_C_COMPILER}
+          -DAROS_TARGET_CC=${_aros_native_target_cc}
+          -P "${CMAKE_SOURCE_DIR}/cmake/stage_native_includes.cmake"
+  COMMAND "${CMAKE_COMMAND}" -E touch "${AROS_NATIVE_INCLUDES_STAMP}"
+  DEPENDS
+    ${_aros_native_include_deps}
+    "${CMAKE_SOURCE_DIR}/cmake/stage_native_includes.cmake"
+    ${_aros_native_include_inputs}
+  COMMENT "Staging native AROS developer includes for CMake-native module builds"
+  VERBATIM
+)
+add_custom_target(aros-native-includes DEPENDS "${AROS_NATIVE_INCLUDES_STAMP}")
+add_custom_target(aros-sdk-interfaces-native)
+
+add_subdirectory(compiler)
+add_subdirectory(arch)
+
+# START LEGACY: temporary wrapper graph until full native CMake replacement.
+if(NOT AROS_ENABLE_LEGACY_PIPELINE)
+  add_subdirectory(rom)
+  add_subdirectory(workbench)
+  add_custom_target(aros-default ALL DEPENDS aros-crosstools-toolchain)
+  return()
+endif()
+
+function(aros_register_legacy_make_target target_name make_target)
+  set(_deps ${ARGN})
+  list(APPEND _deps ${_aros_make_common_deps})
+  add_custom_target(
+    "${target_name}"
+    COMMAND "${CMAKE_COMMAND}" -E chdir "${AROS_LEGACY_BUILD_DIR}"
+            "${_aros_make_program}" ${_aros_make_job_args} ${_aros_make_var_args} "${make_target}"
+    DEPENDS aros-configure ${_deps}
+    COMMENT "Running make ${make_target}"
+    VERBATIM
+  )
+endfunction()
+
+aros_register_legacy_make_target(aros-all all ${_aros_legacy_crosstools_dep})
+aros_register_legacy_make_target(aros-aros AROS ${_aros_legacy_crosstools_dep})
+aros_register_legacy_make_target(aros-complete AROS-complete ${_aros_legacy_crosstools_dep})
+aros_register_legacy_make_target(aros-tools tools)
+aros_register_legacy_make_target(aros-mmake mmake ${_aros_legacy_crosstools_dep})
+aros_register_legacy_make_target(aros-sdk sdk ${_aros_legacy_crosstools_dep})
+aros_register_legacy_make_target(aros-query query)
+aros_register_legacy_make_target(aros-clean clean)
+aros_register_legacy_make_target(aros-install install)
+aros_register_legacy_make_target(aros-kernel kernel ${_aros_legacy_crosstools_dep})
+aros_register_legacy_make_target(aros-compiler compiler ${_aros_legacy_crosstools_dep})
+aros_register_legacy_make_target(aros-contrib contrib ${_aros_legacy_crosstools_dep})
+aros_register_legacy_make_target(aros-ports ports ${_aros_legacy_crosstools_dep})
+
+add_subdirectory(rom)
+add_subdirectory(workbench)
+
+if(COMMAND aros_finalize_module_interfaces)
+  aros_finalize_module_interfaces()
+endif()
+
+add_custom_target(
+  aros-layering-report
+  COMMAND "${CMAKE_COMMAND}"
+          -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
+          -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+          -DAROS_TARGET=${AROS_TARGET}
+          -P "${CMAKE_SOURCE_DIR}/cmake/print_aros_layering.cmake"
+  DEPENDS aros-configure
+  COMMENT "Printing MetaMake layer chain for target ${AROS_TARGET}"
+  VERBATIM
+)
+
+add_custom_target(
+  aros-rom-debug-layering-report
+  COMMAND "${CMAKE_COMMAND}"
+          -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
+          -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+          -DAROS_TARGET=${AROS_TARGET}
+          -DMODULE_PATH=rom/debug
+          -P "${CMAKE_SOURCE_DIR}/cmake/report_layered_module.cmake"
+  DEPENDS aros-configure
+  COMMENT "Printing layered source report for rom/debug"
+  VERBATIM
+)
+
+add_custom_target(
+  aros-rom-utility-layering-report
+  COMMAND "${CMAKE_COMMAND}"
+          -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+          -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
+          -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+          -DAROS_TARGET=${AROS_TARGET}
+          -DMODULE_PATH=rom/utility
+          -P "${CMAKE_SOURCE_DIR}/cmake/report_layered_module.cmake"
+  DEPENDS aros-configure
+  COMMENT "Printing layered source report for rom/utility"
+  VERBATIM
+)
+
+if(AROS_ENABLE_COEXIST_COMPARE)
+  set(_aros_compare_legacy_tooldir "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/tools")
+  set(_aros_compare_specs)
+  set(_aros_compare_native_deps)
+
+  if(TARGET metamake)
+    list(APPEND _aros_compare_specs "mmake::$<TARGET_FILE:metamake>::mmake")
+    list(APPEND _aros_compare_native_deps metamake)
+  endif()
+  if(TARGET setrev)
+    list(APPEND _aros_compare_specs "setrev::$<TARGET_FILE:setrev>::setrev")
+    list(APPEND _aros_compare_native_deps setrev)
+  endif()
+  if(TARGET archtool)
+    list(APPEND _aros_compare_specs "archtool::$<TARGET_FILE:archtool>::archtool")
+    list(APPEND _aros_compare_native_deps archtool)
+  endif()
+  if(TARGET elf2hunk)
+    list(APPEND _aros_compare_specs "elf2hunk::$<TARGET_FILE:elf2hunk>::elf2hunk")
+    list(APPEND _aros_compare_native_deps elf2hunk)
+  endif()
+  if(TARGET ilbmtoc)
+    list(APPEND _aros_compare_specs "ilbmtoc::$<TARGET_FILE:ilbmtoc>::ilbmtoc")
+    list(APPEND _aros_compare_native_deps ilbmtoc)
+  endif()
+  if(TARGET fd2pragma)
+    list(APPEND _aros_compare_specs "fd2pragma::$<TARGET_FILE:fd2pragma>::fd2pragma")
+    list(APPEND _aros_compare_native_deps fd2pragma)
+  endif()
+  if(TARGET genctbl)
+    list(APPEND _aros_compare_specs "genctbl::$<TARGET_FILE:genctbl>::genctbl")
+    list(APPEND _aros_compare_native_deps genctbl)
+  endif()
+  if(TARGET flexcat)
+    list(APPEND _aros_compare_specs "flexcat::$<TARGET_FILE:flexcat>::flexcat")
+    list(APPEND _aros_compare_native_deps flexcat)
+  endif()
+  if(TARGET mkamikeymap)
+    list(APPEND _aros_compare_specs "mkamikeymap::$<TARGET_FILE:mkamikeymap>::mkamikeymap")
+    list(APPEND _aros_compare_native_deps mkamikeymap)
+  endif()
+  if(TARGET createdtdesc)
+    list(APPEND _aros_compare_specs "createdtdesc::$<TARGET_FILE:createdtdesc>::createdtdesc")
+    list(APPEND _aros_compare_native_deps createdtdesc)
+  endif()
+  if(TARGET examinedtdesc)
+    list(APPEND _aros_compare_specs "examinedtdesc::$<TARGET_FILE:examinedtdesc>::examinedtdesc")
+    list(APPEND _aros_compare_native_deps examinedtdesc)
+  endif()
+
+  if(_aros_compare_native_deps)
+    add_custom_target(aros-tools-native DEPENDS ${_aros_compare_native_deps})
+  else()
+    add_custom_target(aros-tools-native)
+  endif()
+
+  if(_aros_compare_specs)
+    string(REPLACE ";" "|" _aros_compare_specs_text "${_aros_compare_specs}")
+    add_custom_target(
+      aros-coexist-compare
+      COMMAND "${CMAKE_COMMAND}"
+              -DLEGACY_TOOLDIR=${_aros_compare_legacy_tooldir}
+              -DSTRICT_COMPARE=${AROS_COEXIST_STRICT_COMPARE}
+              -DSPECS_TEXT=${_aros_compare_specs_text}
+              -P "${CMAKE_SOURCE_DIR}/cmake/compare_legacy_cmake_tools.cmake"
+      DEPENDS aros-tools aros-tools-native
+      COMMENT "Comparing CMake and legacy tool outputs"
+      VERBATIM
+    )
+  else()
+    add_custom_target(aros-coexist-compare DEPENDS aros-tools)
+  endif()
+endif()
+
+if(AROS_ENABLE_OUTPUT_PARITY_CHECK)
+  string(REPLACE "/" "_" _aros_parity_target_safe "${AROS_TARGET}")
+  set(_aros_parity_legacy_build_default "/tmp/aros-legacy-reference-${_aros_parity_target_safe}")
+  set(AROS_PARITY_LEGACY_BUILD_DIR "${_aros_parity_legacy_build_default}" CACHE PATH "Build directory used for legacy-reference parity build")
+  if(AROS_PARITY_LEGACY_BUILD_DIR STREQUAL "${CMAKE_BINARY_DIR}/legacy-reference")
+    set(AROS_PARITY_LEGACY_BUILD_DIR "${_aros_parity_legacy_build_default}" CACHE PATH "Build directory used for legacy-reference parity build" FORCE)
+  endif()
+  set(AROS_PARITY_LEGACY_MAKE_TARGET "AROS" CACHE STRING "Legacy make target used to build the reference tree for parity checks")
+  set(AROS_PARITY_LEGACY_TOOLCHAIN_INSTALL_DIR "" CACHE PATH "Toolchain install path passed only to legacy-reference configure. Empty uses legacy configure defaults.")
+  set(AROS_PARITY_REFERENCE_DIR "${AROS_PARITY_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/AROS" CACHE PATH "Legacy reference output tree to compare against (typically <legacy-build>/bin/<target>/AROS)")
+  set(AROS_PARITY_CMAKE_OUTPUT_DIR "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/AROS" CACHE PATH "CMake-driven output tree to compare")
+  set(_aros_parity_effective_legacy_toolchain_install_dir "${AROS_PARITY_LEGACY_TOOLCHAIN_INSTALL_DIR}")
+  if(NOT _aros_parity_effective_legacy_toolchain_install_dir AND _aros_effective_toolchain_install_dir)
+    set(_aros_parity_effective_legacy_toolchain_install_dir "${_aros_effective_toolchain_install_dir}")
+  endif()
+
+  set(_aros_legacy_reference_configure_args "--target=${AROS_TARGET}")
+  if(_aros_parity_effective_legacy_toolchain_install_dir)
+    list(APPEND _aros_legacy_reference_configure_args "--with-aros-toolchain-install=${_aros_parity_effective_legacy_toolchain_install_dir}")
+  endif()
+  if(AROS_PORTS_SOURCES_DIR)
+    list(APPEND _aros_legacy_reference_configure_args "--with-portssources=${AROS_PORTS_SOURCES_DIR}")
+  endif()
+  list(APPEND _aros_legacy_reference_configure_args ${_aros_configure_args})
+
+  set(_aros_legacy_reference_stamp "${CMAKE_BINARY_DIR}/.cmake-aros-legacy-reference.stamp")
+  set(_aros_parity_make_job_args ${_aros_make_job_args})
+  if(AROS_PARITY_LEGACY_SERIAL_MAKE)
+    set(_aros_parity_make_job_args -j1)
+  endif()
+  set(_aros_parity_make_var_args)
+  list(APPEND _aros_parity_make_var_args "MMAKE_CONFIG=${AROS_PARITY_LEGACY_BUILD_DIR}/mmake.config")
+  set(_aros_parity_env_args)
+  add_custom_command(
+    OUTPUT "${_aros_legacy_reference_stamp}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${AROS_PARITY_LEGACY_BUILD_DIR}"
+    COMMAND "${CMAKE_COMMAND}" -E chdir "${AROS_PARITY_LEGACY_BUILD_DIR}" "${CMAKE_SOURCE_DIR}/configure" ${_aros_legacy_reference_configure_args}
+    # START LEGACY: avoid MetaMake source scan picking stale source-tree build dirs.
+    COMMAND "${CMAKE_COMMAND}"
+            -DMMAKE_CONFIG_PATH=${AROS_PARITY_LEGACY_BUILD_DIR}/mmake.config
+            -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DAROS_ACTIVE_BUILD_DIR=${AROS_PARITY_LEGACY_BUILD_DIR}
+            -P "${_aros_append_mmake_ignoredirs_script}"
+    # END LEGACY
+    COMMAND "${CMAKE_COMMAND}" -E env ${_aros_parity_env_args}
+            "${CMAKE_COMMAND}" -E chdir "${AROS_PARITY_LEGACY_BUILD_DIR}"
+            "${_aros_make_program}" ${_aros_parity_make_job_args} ${_aros_parity_make_var_args} "${AROS_PARITY_LEGACY_MAKE_TARGET}"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${_aros_legacy_reference_stamp}"
+    DEPENDS
+      "${CMAKE_SOURCE_DIR}/configure"
+      "${CMAKE_SOURCE_DIR}/configure.in"
+      "${CMAKE_SOURCE_DIR}/Makefile.in"
+      "${_aros_configure_args_file}"
+      ${_aros_legacy_crosstools_dep}
+    COMMENT "Building legacy reference output in ${AROS_PARITY_LEGACY_BUILD_DIR}"
+    VERBATIM
+  )
+
+  add_custom_target(aros-legacy-reference-build DEPENDS "${_aros_legacy_reference_stamp}")
+
+  add_custom_target(
+    aros-output-parity-compare
+    COMMAND "${CMAKE_COMMAND}"
+            -DLEFT_DIR=${AROS_PARITY_CMAKE_OUTPUT_DIR}
+            -DRIGHT_DIR=${AROS_PARITY_REFERENCE_DIR}
+            -DFAIL_ON_DIFF=${AROS_OUTPUT_PARITY_STRICT}
+            -P "${CMAKE_SOURCE_DIR}/cmake/compare_output_trees.cmake"
+    DEPENDS aros-aros aros-legacy-reference-build
+    COMMENT "Comparing full AROS output tree against legacy reference"
+    VERBATIM
+  )
+endif()
+
+add_custom_target(aros-default ALL DEPENDS aros-all)
+# END LEGACY

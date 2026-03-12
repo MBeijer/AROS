@@ -1,0 +1,9 @@
+#ifndef MKAKM_COMPAT_DOS_DOSHUNKS_H
+#define MKAKM_COMPAT_DOS_DOSHUNKS_H
+
+#define HUNK_CODE     1001
+#define HUNK_RELOC32  1004
+#define HUNK_END      1010
+#define HUNK_HEADER   1011
+
+#endif

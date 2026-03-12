@@ -14,6 +14,10 @@ Please install these packages before moving to next step. Below is a reference l
 
 Proceed to build selection below
 
+## CMake entry point (incremental migration)
+
+A CMake-based top-level entry point is available. See `CMAKE_BUILD.md` for commands and supported targets.
+
 ### Linux-x86_64 (AROS that is a "program" running from Linux)
 
 First, build the cross-compiler by running

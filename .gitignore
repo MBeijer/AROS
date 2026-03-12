@@ -1,3 +1,12 @@
+# IDE specific
+.idea/
+
+# Strays
+*~
+
+# Build output
+build/
+cmake-build-*/
 
 # /
 /config.log

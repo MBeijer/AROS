@@ -1,0 +1,53 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(ilbmtoicon LANGUAGES C)
+
+find_package(PNG QUIET)
+find_package(ZLIB QUIET)
+
+if(NOT PNG_FOUND OR NOT ZLIB_FOUND)
+  message(WARNING "Skipping tools/ilbmtoicon: PNG and/or ZLIB not found")
+  return()
+endif()
+
+add_executable(ilbmtoicon ilbmtoicon.c)
+set(_aros_use_png_target OFF)
+if(TARGET PNG::PNG)
+  get_target_property(_aros_png_imported PNG::PNG IMPORTED)
+  get_target_property(_aros_png_location PNG::PNG IMPORTED_LOCATION)
+  get_target_property(_aros_png_location_release PNG::PNG IMPORTED_LOCATION_RELEASE)
+  get_target_property(_aros_png_configs PNG::PNG IMPORTED_CONFIGURATIONS)
+  if(_aros_png_imported AND (_aros_png_location OR _aros_png_location_release OR _aros_png_configs))
+    set(_aros_use_png_target ON)
+  endif()
+endif()
+
+if(_aros_use_png_target)
+  target_link_libraries(ilbmtoicon PRIVATE PNG::PNG)
+else()
+  target_include_directories(ilbmtoicon PRIVATE "${PNG_PNG_INCLUDE_DIR}")
+  target_link_libraries(ilbmtoicon PRIVATE "${PNG_LIBRARY}")
+endif()
+
+set(_aros_use_zlib_target OFF)
+if(TARGET ZLIB::ZLIB)
+  get_target_property(_aros_zlib_imported ZLIB::ZLIB IMPORTED)
+  get_target_property(_aros_zlib_location ZLIB::ZLIB IMPORTED_LOCATION)
+  get_target_property(_aros_zlib_location_release ZLIB::ZLIB IMPORTED_LOCATION_RELEASE)
+  get_target_property(_aros_zlib_configs ZLIB::ZLIB IMPORTED_CONFIGURATIONS)
+  if(_aros_zlib_imported AND (_aros_zlib_location OR _aros_zlib_location_release OR _aros_zlib_configs))
+    set(_aros_use_zlib_target ON)
+  endif()
+endif()
+
+if(_aros_use_zlib_target)
+  target_link_libraries(ilbmtoicon PRIVATE ZLIB::ZLIB)
+else()
+  target_include_directories(ilbmtoicon PRIVATE "${ZLIB_INCLUDE_DIR}")
+  target_link_libraries(ilbmtoicon PRIVATE "${ZLIB_LIBRARY}")
+endif()
+
+add_executable(infoinfo infoinfo.c)
+
+install(TARGETS ilbmtoicon infoinfo RUNTIME DESTINATION bin)
+install(FILES README DESTINATION share/doc/ilbmtoicon)
