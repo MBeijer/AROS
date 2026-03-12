@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 # rom/ migration entrypoint.
 # Native rom/* CMake module conversions should be added here incrementally,
 # with arch-layer aware source selection and parity checks against legacy outputs.
-set(_aros_rom_native_modules_default "aros;battclock;bootloader;disk;dos;dosboot;exec;expansion;filesystem;filesys/ram;filesys/console_handler;graphics;hyperlayers;intuition;keymap;lddemon;devs/console;devs/gameport;devs/input;devs/keyboard;misc;oop;utility;debug;processor;timer")
+set(_aros_rom_native_modules_default "aros;battclock;bootloader;disk;dos;dosboot;exec;expansion;filesystem;filesys/ram;filesys/console_handler;graphics;hyperlayers;intuition;keymap;lddemon;devs/console;devs/gameport;devs/input;devs/keyboard;hidds/hidd;hidds/gfx;hidds/input;hidds/kbd;hidds/mouse;misc;oop;partition;task;utility;debug;processor;timer")
 set(AROS_ROM_NATIVE_MODULES "${_aros_rom_native_modules_default}" CACHE STRING "Semicolon-separated rom modules enabled for native CMake migration")
 if("${AROS_ROM_NATIVE_MODULES}" STREQUAL "aros;exec;utility;debug;processor;timer"
    OR "${AROS_ROM_NATIVE_MODULES}" STREQUAL "exec;utility;debug;processor;timer"
@@ -12,6 +12,8 @@ if("${AROS_ROM_NATIVE_MODULES}" STREQUAL "aros;exec;utility;debug;processor;time
    OR "${AROS_ROM_NATIVE_MODULES}" STREQUAL "aros;battclock;bootloader;disk;dos;dosboot;exec;expansion;filesystem;keymap;misc;utility;debug;processor;timer"
    OR "${AROS_ROM_NATIVE_MODULES}" STREQUAL "aros;battclock;bootloader;disk;dos;dosboot;exec;expansion;filesystem;graphics;hyperlayers;keymap;misc;oop;utility;debug;processor;timer"
    OR "${AROS_ROM_NATIVE_MODULES}" STREQUAL "aros;battclock;bootloader;disk;dos;dosboot;exec;expansion;filesystem;graphics;hyperlayers;intuition;keymap;lddemon;misc;oop;utility;debug;processor;timer"
+   OR "${AROS_ROM_NATIVE_MODULES}" STREQUAL "aros;battclock;bootloader;disk;dos;dosboot;exec;expansion;filesystem;filesys/ram;filesys/console_handler;graphics;hyperlayers;intuition;keymap;lddemon;devs/console;devs/gameport;devs/input;devs/keyboard;misc;oop;utility;debug;processor;timer"
+   OR "${AROS_ROM_NATIVE_MODULES}" STREQUAL "aros;battclock;bootloader;disk;dos;dosboot;exec;expansion;filesystem;filesys/ram;filesys/console_handler;graphics;hyperlayers;intuition;keymap;lddemon;devs/console;devs/gameport;devs/input;devs/keyboard;hidds/hidd;hidds/gfx;hidds/input;hidds/kbd;hidds/mouse;misc;oop;utility;debug;processor;timer"
    OR "${AROS_ROM_NATIVE_MODULES}" STREQUAL "utility"
    OR "${AROS_ROM_NATIVE_MODULES}" STREQUAL "utility;debug"
    OR "${AROS_ROM_NATIVE_MODULES}" STREQUAL "utility;debug;processor;timer")

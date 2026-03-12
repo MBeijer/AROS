@@ -343,6 +343,16 @@ Wrap temporary compatibility blocks in CMake with explicit `START LEGACY` / `END
   - `lddemon.resource` matches legacy size exactly (`17912`) and its first byte diff is in the same date/version class (`7551: 62 vs 60`).
   - `console.device`, `gameport.device`, `input.device`, and `keyboard.device` all match legacy sizes exactly and currently differ only in the same date/version byte region.
   - `con-handler` and `ram-handler` now also match legacy sizes exactly and currently differ only in the same date/version byte region.
+- Additional verified native HIDD state in `cmake-build-debug`:
+  - `hiddclass.hidd`, `inputclass.hidd`, `keyboard.hidd`, and `mouse.hidd` build and match legacy size exactly.
+  - `gfx.hidd` now also builds and matches legacy size exactly (`224424`).
+- Current parity state for the verified native HIDD outputs:
+  - `hiddclass.hidd`, `inputclass.hidd`, `keyboard.hidd`, `mouse.hidd`, and `gfx.hidd` are now all in the same parity-healthy class as the other migrated ROM artifacts: size-identical to legacy, with the first remaining file diff in the date/version-byte region.
+- Arch-layer `%build_archspecific` and `%rule_*` flags must stay source-local in the native CMake module builder.
+  - The parser must capture the current `USER_CPPFLAGS`, `USER_INCLUDES`, `USER_CFLAGS`, `USER_AFLAGS`, and `OPTIMIZATION_CFLAGS` at the point each active arch-specific rule is declared, then apply those only to the sources from that rule.
+  - Do not let the final `USER_*` state from an arch-layer `mmakefile.src` bleed across every arch source from that file.
+  - Concrete example: `arch/i386-all/hidd/gfx/mmakefile.src` sets `USER_CFLAGS := -mssse3` for `rgbconv_sse` and later `USER_CFLAGS := -mavx2` for `rgbconv_avx`; if CMake reuses the last value globally, `rgbconv_sse.o` is built with AVX/VEX encodings and `gfx.hidd` loses parity.
+  - Concrete example: `arch/x86_64-all/hidd/gfx/mmakefile.src` keeps `-mssse3 -mavx2` on `rgbconv_arch` only, while the alias-expanded `x86_sse` and `x86_avx` side targets must retain their own separate ISA flags.
 - Handler modules do not follow the same `RESIDENT_BEGIN` contract as disk-based libraries/devices/resources in the final linked output.
   - Legacy handler links load generated `*_start.o`, module sources, and `*_end.o`, but do not load `__resident_begin.o` even though `RESIDENT_BEGIN` is defined in the generic make config.
   - The CMake-native generic module builder must therefore skip `RESIDENT_BEGIN` injection for `modtype=handler`; otherwise handlers gain an extra `__resident_entry` stub at address `0`, shifting the real handler entry and breaking parity.

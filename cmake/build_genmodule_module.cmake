@@ -71,6 +71,18 @@ function(_aros_remove_token_entries var_name)
   set(${var_name} "${_filtered_values}" PARENT_SCOPE)
 endfunction()
 
+function(_aros_tokenize_mmake_value input_value out_var)
+  if("${input_value}" STREQUAL "")
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  separate_arguments(_tokens NATIVE_COMMAND "${input_value}")
+  _aros_remove_empty_entries(_tokens)
+  _aros_remove_token_entries(_tokens "\\")
+  set(${out_var} "${_tokens}" PARENT_SCOPE)
+endfunction()
+
 function(_aros_remove_flag_pair var_name flag value)
   if(NOT DEFINED ${var_name} OR "${${var_name}}" STREQUAL "")
     set(${var_name} "" PARENT_SCOPE)
@@ -420,6 +432,35 @@ function(_aros_split_make_arguments input_value out_var)
   set(${out_var} "${_arguments}" PARENT_SCOPE)
 endfunction()
 
+function(_aros_set_make_context_for_file file_path)
+  get_filename_component(_file_dir "${file_path}" DIRECTORY)
+  if(IS_ABSOLUTE "${_file_dir}")
+    file(RELATIVE_PATH _context_curdir "${AROS_SOURCE_DIR}" "${_file_dir}")
+  else()
+    set(_context_curdir "${_file_dir}")
+  endif()
+
+  if(_context_curdir MATCHES "^\\.\\.?(/|$)")
+    if(DEFINED MODULE_PATH AND NOT MODULE_PATH STREQUAL "")
+      set(_context_curdir "${MODULE_PATH}")
+    else()
+      set(_context_curdir "")
+    endif()
+  endif()
+
+  set(_context_maindir "")
+  if(ARGC GREATER 1 AND NOT "${ARGV1}" STREQUAL "")
+    set(_context_maindir "${ARGV1}")
+  elseif(DEFINED MODULE_PATH AND NOT MODULE_PATH STREQUAL "")
+    set(_context_maindir "${MODULE_PATH}")
+  else()
+    set(_context_maindir "${_context_curdir}")
+  endif()
+
+  set(_AROS_MMAKE_CONTEXT_CURDIR "${_context_curdir}" PARENT_SCOPE)
+  set(_AROS_MMAKE_CONTEXT_MAINDIR "${_context_maindir}" PARENT_SCOPE)
+endfunction()
+
 function(_aros_expand_make_tokens input_value out_var)
   _aros_get_target_context()
   set(_expanded "${input_value}")
@@ -518,7 +559,17 @@ function(_aros_expand_make_tokens input_value out_var)
     elseif(_var_name STREQUAL "SRCDIR")
       set(_replacement "${AROS_SOURCE_DIR}")
     elseif(_var_name STREQUAL "CURDIR")
-      set(_replacement "${MODULE_PATH}")
+      if(DEFINED _AROS_MMAKE_CONTEXT_CURDIR AND NOT _AROS_MMAKE_CONTEXT_CURDIR STREQUAL "")
+        set(_replacement "${_AROS_MMAKE_CONTEXT_CURDIR}")
+      else()
+        set(_replacement "${MODULE_PATH}")
+      endif()
+    elseif(_var_name STREQUAL "MAINDIR")
+      if(DEFINED _AROS_MMAKE_CONTEXT_MAINDIR AND NOT _AROS_MMAKE_CONTEXT_MAINDIR STREQUAL "")
+        set(_replacement "${_AROS_MMAKE_CONTEXT_MAINDIR}")
+      else()
+        set(_replacement "${MODULE_PATH}")
+      endif()
     elseif(_var_name STREQUAL "GENDIR")
       set(_replacement "${_make_gendir}")
     else()
@@ -535,6 +586,7 @@ function(_aros_collect_make_variable_from_file file_path variable_name out_var)
     return()
   endif()
 
+  _aros_set_make_context_for_file("${file_path}")
   _aros_read_mmake_logical_lines("${file_path}" _logical_lines)
 
   set(_values)
@@ -622,6 +674,7 @@ function(_aros_collect_archincludes maindir modname out_var)
       continue()
     endif()
 
+    _aros_set_make_context_for_file("${_mmakefile_path}" "${maindir}")
     _aros_read_mmake_logical_lines("${_mmakefile_path}" _logical_lines)
     foreach(_line IN LISTS _logical_lines)
       if(_line MATCHES "^#")
@@ -792,6 +845,7 @@ function(_aros_collect_active_mmake_targets mmake_name active_alias_layers logic
 endfunction()
 
 function(_aros_parse_mmake_module file_path)
+  _aros_set_make_context_for_file("${file_path}")
   _aros_read_mmake_logical_lines("${file_path}" _logical_lines)
   set(_condition_stack)
   set(_AROS_MMAKE_VAR_RESIDENT_BEGIN "compiler/libinit/libentry")
@@ -1058,11 +1112,49 @@ function(_aros_parse_mmake_module file_path)
       endif()
 
       if(_archspec_is_active)
+        _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_USER_CPPFLAGS}" _archspec_user_cppflags)
+        _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_USER_INCLUDES}" _archspec_user_includes)
+        _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_USER_CFLAGS}" _archspec_user_cflags)
+        _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_USER_AFLAGS}" _archspec_user_aflags)
+        _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_OPTIMIZATION_CFLAGS}" _archspec_optimization_cflags)
+
         list(APPEND _module_mmake_arch_files ${_archspec_files})
         list(APPEND _module_mmake_arch_asmfiles ${_archspec_asmfiles})
         list(APPEND _module_mmake_arch_linklibfiles ${_archspec_linklibfiles})
         list(APPEND _module_mmake_arch_linklibobjs ${_archspec_linklibobjs})
         list(APPEND _module_mmake_arch_usesdks ${_archspec_usesdks})
+
+        set(_archspec_c_compile_args
+          ${_archspec_user_cppflags}
+          ${_archspec_user_includes}
+          ${_archspec_user_cflags}
+          ${_archspec_optimization_cflags}
+        )
+        _aros_remove_empty_entries(_archspec_c_compile_args)
+        if(_archspec_c_compile_args)
+          list(JOIN _archspec_c_compile_args " " _archspec_c_compile_args_string)
+          foreach(_archspec_source IN LISTS _archspec_files)
+            list(APPEND _module_mmake_arch_source_flag_specs
+              "${_archspec_source}|${_archspec_c_compile_args_string}"
+            )
+          endforeach()
+        endif()
+
+        set(_archspec_asm_compile_args
+          ${_archspec_user_cppflags}
+          ${_archspec_user_includes}
+          ${_archspec_user_aflags}
+        )
+        _aros_remove_empty_entries(_archspec_asm_compile_args)
+        if(_archspec_asm_compile_args)
+          list(JOIN _archspec_asm_compile_args " " _archspec_asm_compile_args_string)
+          foreach(_archspec_source IN LISTS _archspec_asmfiles)
+            list(APPEND _module_mmake_arch_source_flag_specs
+              "${_archspec_source}|${_archspec_asm_compile_args_string}"
+            )
+          endforeach()
+        endif()
+
         if(DEFINED _AROS_MMAKE_VAR_ISA_FLAGS AND NOT "${_AROS_MMAKE_VAR_ISA_FLAGS}" STREQUAL "")
           foreach(_archspec_source IN LISTS _archspec_files _archspec_asmfiles)
             list(APPEND _module_mmake_arch_source_flag_specs
@@ -1141,6 +1233,36 @@ function(_aros_parse_mmake_module file_path)
       else()
         list(APPEND _module_mmake_arch_files ${_rule_basenames})
       endif()
+
+      _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_USER_CPPFLAGS}" _rule_user_cppflags)
+      _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_USER_INCLUDES}" _rule_user_includes)
+      if(_rule_kind STREQUAL "asm")
+        _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_USER_AFLAGS}" _rule_user_compile_flags)
+        set(_rule_compile_args
+          ${_rule_user_cppflags}
+          ${_rule_user_includes}
+          ${_rule_user_compile_flags}
+        )
+      else()
+        _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_USER_CFLAGS}" _rule_user_compile_flags)
+        _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_OPTIMIZATION_CFLAGS}" _rule_optimization_cflags)
+        set(_rule_compile_args
+          ${_rule_user_cppflags}
+          ${_rule_user_includes}
+          ${_rule_user_compile_flags}
+          ${_rule_optimization_cflags}
+        )
+      endif()
+      _aros_remove_empty_entries(_rule_compile_args)
+      if(_rule_compile_args)
+        list(JOIN _rule_compile_args " " _rule_compile_args_string)
+        foreach(_rule_source IN LISTS _rule_basenames)
+          list(APPEND _module_mmake_arch_source_flag_specs
+            "${_rule_source}|${_rule_compile_args_string}"
+          )
+        endforeach()
+      endif()
+
       if(DEFINED _AROS_MMAKE_VAR_ISA_FLAGS AND NOT "${_AROS_MMAKE_VAR_ISA_FLAGS}" STREQUAL "")
         foreach(_rule_source IN LISTS _rule_basenames)
           list(APPEND _module_mmake_arch_source_flag_specs
@@ -1573,17 +1695,8 @@ if(DEFINED MODULE_MMAKEFILE AND NOT MODULE_MMAKEFILE STREQUAL "")
         message(STATUS "Layer ${_module_layer} asm files: ${MODULE_MMAKE_PARSED_ARCH_ASMFILES}")
       endif()
 
-      set(_module_layer_source_c_compile_args
-        ${MODULE_MMAKE_PARSED_USER_CPPFLAGS}
-        ${MODULE_MMAKE_PARSED_USER_INCLUDES}
-        ${MODULE_MMAKE_PARSED_USER_CFLAGS}
-        ${MODULE_MMAKE_PARSED_OPTIMIZATION_CFLAGS}
-      )
-      set(_module_layer_source_asm_compile_args
-        ${MODULE_MMAKE_PARSED_USER_CPPFLAGS}
-        ${MODULE_MMAKE_PARSED_USER_INCLUDES}
-        ${MODULE_MMAKE_PARSED_USER_AFLAGS}
-      )
+      set(_module_layer_source_c_compile_args)
+      set(_module_layer_source_asm_compile_args)
       list(APPEND MODULE_LINK_OPTIONS ${MODULE_MMAKE_PARSED_USER_LDFLAGS})
 
       foreach(_sdk IN LISTS MODULE_MMAKE_PARSED_ARCH_USESDKS)
@@ -1646,6 +1759,7 @@ if(DEFINED MODULE_MMAKEFILE AND NOT MODULE_MMAKEFILE STREQUAL "")
   _aros_debug_var(MODULE_LAYER_MANIFEST_LAYERS)
   _aros_debug_var(MODULE_LAYER_OVERRIDES)
   _aros_debug_var(MODULE_LAYER_ADDITIONS)
+  _aros_debug_var(MODULE_LAYER_SOURCE_FLAG_SPECS)
 endif()
 _aros_collect_layer_makeopts("USER_CPPFLAGS" _module_layer_cppflags)
 _aros_collect_layer_makeopts("USER_INCLUDES" _module_layer_includes)
@@ -2025,6 +2139,9 @@ foreach(_source IN LISTS _module_sources)
     separate_arguments(_layer_source_extra_compile_args NATIVE_COMMAND "${_layer_source_flag_value}")
     list(APPEND _source_compile_args ${_layer_source_extra_compile_args})
   endforeach()
+  if(DEFINED AROS_GENMODULE_DEBUG AND AROS_GENMODULE_DEBUG)
+    message(STATUS "Compile args for ${_source}: ${_source_compile_args}")
+  endif()
   execute_process(
     COMMAND "${_module_cc}" ${_source_compile_args} -c "${_source}" -o "${_object}"
     RESULT_VARIABLE _compile_result
