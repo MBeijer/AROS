@@ -1869,6 +1869,12 @@ _aros_decode_list(MODULE_LINK_OPTIONS)
 _aros_decode_list(MODULE_LINK_LIBS)
 _aros_decode_list(MODULE_AUTO_LINK_LIBS)
 _aros_remove_empty_entries(MODULE_INCLUDE_DIRS)
+if(DEFINED AROS_NATIVE_INCLUDE_DIR AND NOT AROS_NATIVE_INCLUDE_DIR STREQUAL "")
+  # The flat public include root is appended later on purpose. If it stays in
+  # MODULE_INCLUDE_DIRS, generated private sources can resolve public headers
+  # like native-includes/lddemon.h before module-local private headers.
+  list(REMOVE_ITEM MODULE_INCLUDE_DIRS "${AROS_NATIVE_INCLUDE_DIR}")
+endif()
 _aros_remove_empty_entries(MODULE_COMPILE_DEFINITIONS)
 _aros_remove_empty_entries(MODULE_COMPILE_OPTIONS)
 _aros_remove_empty_entries(MODULE_LINK_OPTIONS)

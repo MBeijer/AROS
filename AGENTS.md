@@ -568,5 +568,9 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
   - raw source directories must not shadow staged/generated public headers
     - keep generated/module include dirs and staged native include roots ahead of `${CMAKE_SOURCE_DIR}/${MODULE_PATH}`
     - concrete failure: `workbench/libs/asl/buttonclass.c` picked the wrong `coolimages.h` ordering and then saw `struct CoolImage` without `numcolors`
+  - the flat staged public include root `AROS_NATIVE_INCLUDE_DIR` is a separate late include-order case
+    - do not leave it inside early runtime `MODULE_INCLUDE_DIRS`; `build_genmodule_module.cmake` already appends it later on purpose
+    - otherwise generated private sources can resolve flat public headers before module-local private ones
+    - concrete failure: `rom/lddemon` can pick `native-includes/lddemon.h` instead of `rom/lddemon/lddemon.h`, leaving `struct IntLDDemonBase` incomplete in generated `lddemon_start.c`
   - after shared `AROSModule.cmake` changes, even `/tmp` Ninja build dirs can spend a long time rewriting interface-only `cmake -P` steps because the source tree itself lives on NFS
     - treat that as a verification/performance caveat, not automatically as a new dependency bug

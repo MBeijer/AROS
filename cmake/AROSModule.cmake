@@ -2442,6 +2442,12 @@ function(aros_register_genmodule_module target_name)
   set(_aros_module_runtime_include_dirs ${AROS_MODULE_INCLUDE_DIRS})
   list(APPEND _aros_module_runtime_include_dirs ${_aros_module_interface_include_dirs})
   list(REMOVE_DUPLICATES _aros_module_runtime_include_dirs)
+  if(AROS_NATIVE_INCLUDE_DIR)
+    # The builder appends the flat public include root later on purpose.
+    # Keeping it in MODULE_INCLUDE_DIRS lets generated private sources pick
+    # public headers like native-includes/lddemon.h before module-local ones.
+    list(REMOVE_ITEM _aros_module_runtime_include_dirs "${AROS_NATIVE_INCLUDE_DIR}")
+  endif()
   _aros_encode_list("${_aros_module_runtime_include_dirs}" _aros_module_runtime_include_dirs_encoded)
   add_library("${_aros_module_interface_target}" INTERFACE)
   if(_aros_module_interface_include_dirs)
