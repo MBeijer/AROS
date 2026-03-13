@@ -1727,6 +1727,116 @@ function(_aros_collect_module_layer_include_dirs module_path module_mmake_name o
   set(${out_var} "${_include_dirs}" PARENT_SCOPE)
 endfunction()
 
+function(_aros_collect_module_catalog_cd module_path out_var)
+  set(_catalog_cd_files)
+  foreach(_catalog_dir IN ITEMS catalogs Catalogs cat)
+    file(GLOB _catalog_dir_cds
+      LIST_DIRECTORIES FALSE
+      "${CMAKE_SOURCE_DIR}/${module_path}/${_catalog_dir}/*.cd"
+    )
+    list(APPEND _catalog_cd_files ${_catalog_dir_cds})
+  endforeach()
+  list(REMOVE_DUPLICATES _catalog_cd_files)
+
+  list(LENGTH _catalog_cd_files _catalog_cd_count)
+  if(_catalog_cd_count EQUAL 1)
+    list(GET _catalog_cd_files 0 _catalog_cd_file)
+    set(${out_var} "${_catalog_cd_file}" PARENT_SCOPE)
+  else()
+    set(${out_var} "" PARENT_SCOPE)
+  endif()
+endfunction()
+
+function(_aros_module_uses_local_strings_header out_var)
+  set(_needs_local_strings_header FALSE)
+
+  foreach(_module_source_file IN LISTS ARGN)
+    if(IS_DIRECTORY "${_module_source_file}")
+      continue()
+    endif()
+    if(NOT _module_source_file MATCHES "\\.(c|cc|cpp|cxx|h|hh|hpp|hxx|s|S)$")
+      continue()
+    endif()
+
+    file(
+      STRINGS
+      "${_module_source_file}"
+      _strings_header_include_lines
+      REGEX "^[ \t]*#[ \t]*include[ \t]+\"strings\\.h\""
+    )
+    if(_strings_header_include_lines)
+      set(_needs_local_strings_header TRUE)
+      break()
+    endif()
+  endforeach()
+
+  set(${out_var} "${_needs_local_strings_header}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_register_module_local_strings_header module_path out_target out_include_dir)
+  _aros_sanitize_property_key("${module_path}" _module_path_key)
+  get_property(
+    _existing_target
+    GLOBAL
+    PROPERTY "AROS_MODULE_LOCAL_STRINGS_HEADER_TARGET_${_module_path_key}"
+  )
+  get_property(
+    _existing_include_dir
+    GLOBAL
+    PROPERTY "AROS_MODULE_LOCAL_STRINGS_HEADER_INCLUDE_DIR_${_module_path_key}"
+  )
+  if(_existing_target OR _existing_include_dir)
+    set(${out_target} "${_existing_target}" PARENT_SCOPE)
+    set(${out_include_dir} "${_existing_include_dir}" PARENT_SCOPE)
+    return()
+  endif()
+
+  set(_module_source_deps ${ARGN})
+  _aros_collect_module_catalog_cd("${module_path}" _catalog_cd_file)
+  if(NOT _catalog_cd_file)
+    set(${out_target} "" PARENT_SCOPE)
+    set(${out_include_dir} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  _aros_module_uses_local_strings_header(_needs_local_strings_header ${_module_source_deps})
+  if(NOT _needs_local_strings_header)
+    set(${out_target} "" PARENT_SCOPE)
+    set(${out_include_dir} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  string(REPLACE "/" "_" _module_id "${module_path}")
+  string(REPLACE "/" "-" _module_target_id "${module_path}")
+  set(_strings_header_dir "${CMAKE_BINARY_DIR}/modules/${_module_id}/generated")
+  set(_strings_header_output "${_strings_header_dir}/strings.h")
+  set(_strings_header_target "aros-${_module_target_id}-strings-header")
+
+  aros_add_flexcat_header(
+    "${_strings_header_target}"
+    OUTPUT "${_strings_header_output}"
+    CD_FILE "${_catalog_cd_file}"
+    SOURCE_DESCRIPTION "${CMAKE_SOURCE_DIR}/tools/flexcat/src/sd/C_h_aros.sd"
+  )
+
+  _aros_compute_target_folders("${module_path}" _public_folder _internal_folder)
+  _aros_set_target_folder_if_exists("${_strings_header_target}" "${_internal_folder}")
+
+  set_property(
+    GLOBAL
+    PROPERTY "AROS_MODULE_LOCAL_STRINGS_HEADER_TARGET_${_module_path_key}"
+    "${_strings_header_target}"
+  )
+  set_property(
+    GLOBAL
+    PROPERTY "AROS_MODULE_LOCAL_STRINGS_HEADER_INCLUDE_DIR_${_module_path_key}"
+    "${_strings_header_dir}"
+  )
+
+  set(${out_target} "${_strings_header_target}" PARENT_SCOPE)
+  set(${out_include_dir} "${_strings_header_dir}" PARENT_SCOPE)
+endfunction()
+
 function(_aros_collect_module_interface_include_dirs module_path module_mmake_name module_sdk module_mmakefile out_var)
   string(REPLACE "/" "_" _module_id "${module_path}")
   get_filename_component(_module_dir_name "${module_path}" NAME)
@@ -1739,7 +1849,6 @@ function(_aros_collect_module_interface_include_dirs module_path module_mmake_na
   )
   _aros_collect_module_layer_include_dirs("${module_path}" "${module_mmake_name}" _layer_include_dirs)
   _aros_append_include_dirs(_include_dirs ${_layer_include_dirs})
-  _aros_append_include_dirs(_include_dirs "${CMAKE_SOURCE_DIR}/${module_path}")
 
   if(NOT module_mmakefile STREQUAL "")
     _aros_collect_make_variable_from_file("${module_mmakefile}" "USER_INCLUDES" _module_user_include_tokens "${module_path}")
@@ -1771,6 +1880,7 @@ function(_aros_collect_module_interface_include_dirs module_path module_mmake_na
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/${module_path}/include"
     "${CMAKE_BINARY_DIR}/modules/${_module_id}/genmodule/include"
     "${AROS_NATIVE_INCLUDE_DIR}"
+    "${CMAKE_SOURCE_DIR}/${module_path}"
   )
   _aros_filter_interface_include_dirs(_include_dirs)
 
@@ -2329,6 +2439,10 @@ function(aros_register_genmodule_module target_name)
     "${AROS_MODULE_MMAKEFILE_SRC}"
     _aros_module_interface_include_dirs
   )
+  set(_aros_module_runtime_include_dirs ${AROS_MODULE_INCLUDE_DIRS})
+  list(APPEND _aros_module_runtime_include_dirs ${_aros_module_interface_include_dirs})
+  list(REMOVE_DUPLICATES _aros_module_runtime_include_dirs)
+  _aros_encode_list("${_aros_module_runtime_include_dirs}" _aros_module_runtime_include_dirs_encoded)
   add_library("${_aros_module_interface_target}" INTERFACE)
   if(_aros_module_interface_include_dirs)
     target_include_directories("${_aros_module_interface_target}" INTERFACE ${_aros_module_interface_include_dirs})
@@ -2409,7 +2523,7 @@ function(aros_register_genmodule_module target_name)
             -DMODULE_LAYER_OVERRIDES=${_aros_module_layer_overrides}
             -DMODULE_LAYER_ADDITIONS=${_aros_module_layer_additions}
             -DMODULE_LAYER_EXCLUSIONS=${_aros_module_layer_exclusions}
-            -DMODULE_INCLUDE_DIRS=$<JOIN:$<TARGET_PROPERTY:${_aros_module_interface_target},AROS_MODULE_INTERFACE_INCLUDE_DIRS>,|>
+            -DMODULE_INCLUDE_DIRS=${_aros_module_runtime_include_dirs_encoded}
             -DMODULE_COMPILE_DEFINITIONS=${_aros_module_compile_definitions}
             -DMODULE_COMPILE_OPTIONS=${_aros_module_compile_options}
             -DMODULE_LINK_OPTIONS=${_aros_module_link_options}
@@ -2572,6 +2686,20 @@ function(aros_register_mmake_genmodule_module target_name)
     "${AROS_MMAKE_MODULE_PATH}"
     _aros_module_staged_include_paths
   )
+  _aros_register_module_local_strings_header(
+    "${AROS_MMAKE_MODULE_PATH}"
+    _aros_module_local_strings_header_target
+    _aros_module_local_strings_header_dir
+    ${_aros_module_source_deps}
+  )
+  set(_aros_module_extra_include_dirs)
+  set(_aros_module_extra_dep_targets)
+  if(_aros_module_local_strings_header_dir)
+    list(APPEND _aros_module_extra_include_dirs "${_aros_module_local_strings_header_dir}")
+  endif()
+  if(_aros_module_local_strings_header_target)
+    list(APPEND _aros_module_extra_dep_targets "${_aros_module_local_strings_header_target}")
+  endif()
 
   if(_aros_mmake_ARCHSPECIFIC)
     set(_aros_archspecific ARCHSPECIFIC)
@@ -2592,6 +2720,7 @@ function(aros_register_mmake_genmodule_module target_name)
     MODULE_SUFFIX "${_aros_mmake_MODULE_SUFFIX}"
     SOURCE_INCLUDE_PATHS ${_aros_module_source_include_paths}
     STAGED_INCLUDE_PATHS ${_aros_module_staged_include_paths}
+    INCLUDE_DIRS ${_aros_module_extra_include_dirs}
     LINK_LIBS ${_aros_mmake_MODULE_LINK_LIBS} ${_aros_mmake_CONF_RELLIBS}
     INTERFACE_NAMES ${_aros_mmake_INTERFACE_NAMES}
     INTERFACE_DEPENDS ${_aros_mmake_INTERFACE_DEPENDS}
@@ -2599,6 +2728,7 @@ function(aros_register_mmake_genmodule_module target_name)
     DEPENDS
       "${_aros_mmakefile_src}"
       "${_aros_module_conf}"
+      ${_aros_module_extra_dep_targets}
       ${_aros_module_source_deps}
       ${AROS_MMAKE_DEPENDS}
   )

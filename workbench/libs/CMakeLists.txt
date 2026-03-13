@@ -1,13 +1,49 @@
 cmake_minimum_required(VERSION 3.20)
 
 # workbench/libs migration entrypoint.
-set(_aros_workbench_libs_native_modules_default "gadtools")
+set(_aros_workbench_libs_native_modules_default
+  "amigaguide;asl;bullet;cgfx;commodities;coolimages;datatypes;diskfont;gadtools;icon;iffparse;locale;lowlevel;realtime;rexxsyslib;version;workbench"
+)
 set(
   AROS_WORKBENCH_LIBS_NATIVE_MODULES
   "${_aros_workbench_libs_native_modules_default}"
   CACHE STRING
   "Semicolon-separated workbench/libs modules enabled for native CMake migration"
 )
+set(_aros_workbench_libs_native_modules_legacy_default "gadtools")
+set(_aros_workbench_libs_native_modules_previous_default
+  "amigaguide;asl;bullet;cgfx;commodities;coolimages;datatypes;diskfont;gadtools;icon;iffparse;locale;rexxsyslib;workbench"
+)
+set(_aros_workbench_libs_native_modules_previous_default_v2
+  "amigaguide;asl;bullet;cgfx;commodities;coolimages;datatypes;diskfont;gadtools;icon;iffparse;locale;lowlevel;realtime;rexxsyslib;workbench"
+)
+if(AROS_WORKBENCH_LIBS_NATIVE_MODULES STREQUAL "${_aros_workbench_libs_native_modules_legacy_default}")
+  set(
+    AROS_WORKBENCH_LIBS_NATIVE_MODULES
+    "${_aros_workbench_libs_native_modules_default}"
+    CACHE STRING
+    "Semicolon-separated workbench/libs modules enabled for native CMake migration"
+    FORCE
+  )
+endif()
+if(AROS_WORKBENCH_LIBS_NATIVE_MODULES STREQUAL "${_aros_workbench_libs_native_modules_previous_default}")
+  set(
+    AROS_WORKBENCH_LIBS_NATIVE_MODULES
+    "${_aros_workbench_libs_native_modules_default}"
+    CACHE STRING
+    "Semicolon-separated workbench/libs modules enabled for native CMake migration"
+    FORCE
+  )
+endif()
+if(AROS_WORKBENCH_LIBS_NATIVE_MODULES STREQUAL "${_aros_workbench_libs_native_modules_previous_default_v2}")
+  set(
+    AROS_WORKBENCH_LIBS_NATIVE_MODULES
+    "${_aros_workbench_libs_native_modules_default}"
+    CACHE STRING
+    "Semicolon-separated workbench/libs modules enabled for native CMake migration"
+    FORCE
+  )
+endif()
 foreach(_aros_wb_lib_native_module IN LISTS AROS_WORKBENCH_LIBS_NATIVE_MODULES)
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_aros_wb_lib_native_module}/CMakeLists.txt")
     add_subdirectory("${_aros_wb_lib_native_module}")

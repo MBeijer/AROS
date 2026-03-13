@@ -544,3 +544,29 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
   - without that, lowercase preprocessed asm like `arch/x86_64-all/exec/execstubs.s` fails with raw assembler parse errors on backslash-continued macro bodies and `#include`
   - genmodule-produced `LINKLIBAFILES` / `RELLINKLIBAFILES` also need the same `-x assembler-with-cpp` treatment
   - after that shared fix, `exec.library` builds again in the active Ninja tree
+- Current workbench/lib migration findings:
+  - existing caches may still pin `AROS_WORKBENCH_LIBS_NATIVE_MODULES` to older defaults (`gadtools`, or later broad defaults that still predate newly added modules); native workbench/lib cache migration must keep upgrading those stale values so newly migrated libraries actually register in older build trees
+  - current default native workbench/lib set now includes:
+    - `amigaguide`, `asl`, `bullet`, `cgfx`, `commodities`, `coolimages`, `datatypes`, `diskfont`, `gadtools`, `icon`, `iffparse`, `locale`, `lowlevel`, `realtime`, `rexxsyslib`, `version`, `workbench`
+  - `workbench/libs/lowlevel`, `workbench/libs/realtime`, and `workbench/libs/version` fit the existing generic `aros_register_mmake_genmodule_module(...)` path and do not need module-specific CMake logic
+  - current legacy reference tree under `/tmp/aros-legacy-reference-linux-x86_64/bin/linux-x86_64/AROS` still does not contain matching workbench-lib artifacts for:
+    - `asl.library`
+    - `gadtools.library`
+    - `lowlevel.library`
+    - `realtime.library`
+    - `version.library`
+  - do not block native migration of those modules on immediate parity until the legacy reference generation path is widened enough to produce comparable workbench-lib outputs
+  - public artifact aliases are now the human-facing names:
+    - examples: `asl.library`, `locale.library`, `rexxsyslib.library`
+    - short names like `asl`, `exec`, and `locale` are reserved for CMake `INTERFACE` dependency targets, not Ninja-buildable artifact targets
+  - module-local catalog headers need a generic CMake path:
+    - if a module source set includes `"strings.h"` and the module has exactly one local `.cd` file under a standard catalog directory, CMake should generate a module-local `strings.h` through `flexcat`
+    - current generic output path is `CMAKE_BINARY_DIR/modules/<module-id>/generated/strings.h`
+    - this is required for workbench modules like `workbench/libs/asl`, where falling back to the staged global `strings.h` loses the module-local `MSG_*` defines
+  - native runtime module builds must honor compile-only include dirs separately from the broader `INTERFACE` include surface
+    - the runtime `build_genmodule_module.cmake` command now needs the explicit module compile include list (`MODULE_INCLUDE_DIRS`) ahead of inherited/public include dirs
+  - raw source directories must not shadow staged/generated public headers
+    - keep generated/module include dirs and staged native include roots ahead of `${CMAKE_SOURCE_DIR}/${MODULE_PATH}`
+    - concrete failure: `workbench/libs/asl/buttonclass.c` picked the wrong `coolimages.h` ordering and then saw `struct CoolImage` without `numcolors`
+  - after shared `AROSModule.cmake` changes, even `/tmp` Ninja build dirs can spend a long time rewriting interface-only `cmake -P` steps because the source tree itself lives on NFS
+    - treat that as a verification/performance caveat, not automatically as a new dependency bug
