@@ -37,7 +37,9 @@ function(_aros_get_target_context out_arch out_cpu out_variant out_family)
   endif()
 
   set(_target_cfg "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg")
-  if(EXISTS "${_target_cfg}")
+  if(DEFINED AROS_TARGET_FAMILY AND NOT AROS_TARGET_FAMILY STREQUAL "")
+    set(_family "${AROS_TARGET_FAMILY}")
+  elseif(EXISTS "${_target_cfg}")
     file(STRINGS "${_target_cfg}" _family_line REGEX "^FAMILY[ \t]*:=")
     if(_family_line)
       string(REGEX REPLACE "^FAMILY[ \t]*:=[ \t]*" "" _family "${_family_line}")
@@ -1415,6 +1417,75 @@ function(aros_add_emit_tool_stdout_file target_name)
   add_custom_target("${target_name}" DEPENDS "${AROS_EMIT_OUTPUT}")
 endfunction()
 
+function(aros_add_genmodule_exports target_name)
+  set(_options)
+  set(_one_value_args
+    MODULE_PATH
+    CONF_FILE
+    MODULE_NAME
+    MODULE_TYPE
+  )
+  set(_multi_value_args
+    WRITEINCLUDES_DIRS
+    WRITELIBDEFS_DIRS
+    DEPENDS
+  )
+  cmake_parse_arguments(AROS_GENEXPORT "${_options}" "${_one_value_args}" "${_multi_value_args}" ${ARGN})
+
+  if(NOT AROS_GENEXPORT_CONF_FILE
+     OR NOT AROS_GENEXPORT_MODULE_NAME
+     OR NOT AROS_GENEXPORT_MODULE_TYPE)
+    message(FATAL_ERROR
+      "aros_add_genmodule_exports requires CONF_FILE, MODULE_NAME, and MODULE_TYPE"
+    )
+  endif()
+
+  if(NOT TARGET genmodule)
+    message(FATAL_ERROR "aros_add_genmodule_exports requires the native genmodule target")
+  endif()
+
+  if(NOT AROS_GENEXPORT_WRITEINCLUDES_DIRS AND NOT AROS_GENEXPORT_WRITELIBDEFS_DIRS)
+    message(FATAL_ERROR
+      "aros_add_genmodule_exports requires WRITEINCLUDES_DIRS and/or WRITELIBDEFS_DIRS"
+    )
+  endif()
+
+  if(AROS_GENEXPORT_MODULE_PATH)
+    string(REPLACE "/" "_" _aros_genexport_module_id "${AROS_GENEXPORT_MODULE_PATH}")
+  else()
+    set(_aros_genexport_module_id "${target_name}")
+  endif()
+  set(_aros_genexport_stamp_dir "${CMAKE_BINARY_DIR}/modules/${_aros_genexport_module_id}/extras")
+  set(_aros_genexport_stamp "${_aros_genexport_stamp_dir}/${target_name}.stamp")
+
+  _aros_encode_list("${AROS_GENEXPORT_WRITEINCLUDES_DIRS}" _aros_genexport_writeincludes_dirs)
+  _aros_encode_list("${AROS_GENEXPORT_WRITELIBDEFS_DIRS}" _aros_genexport_writelibdefs_dirs)
+
+  add_custom_command(
+    OUTPUT "${_aros_genexport_stamp}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_aros_genexport_stamp_dir}"
+    COMMAND "${CMAKE_COMMAND}"
+            -DAROS_GENMODULE=$<TARGET_FILE:genmodule>
+            -DMODULE_CONF=${AROS_GENEXPORT_CONF_FILE}
+            -DMODULE_NAME=${AROS_GENEXPORT_MODULE_NAME}
+            -DMODULE_TYPE=${AROS_GENEXPORT_MODULE_TYPE}
+            -DWRITEINCLUDES_DIRS_ENCODED=${_aros_genexport_writeincludes_dirs}
+            -DWRITELIBDEFS_DIRS_ENCODED=${_aros_genexport_writelibdefs_dirs}
+            -DAROS_LIST_SEP=__AROS_LIST_SEP__
+            -P "${CMAKE_SOURCE_DIR}/cmake/run_genmodule_exports.cmake"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${_aros_genexport_stamp}"
+    DEPENDS
+      genmodule
+      "${AROS_GENEXPORT_CONF_FILE}"
+      "${CMAKE_SOURCE_DIR}/cmake/run_genmodule_exports.cmake"
+      ${AROS_GENEXPORT_DEPENDS}
+    COMMENT "Generating extra genmodule exports for ${AROS_GENEXPORT_MODULE_NAME}.${AROS_GENEXPORT_MODULE_TYPE}"
+    VERBATIM
+  )
+
+  add_custom_target("${target_name}" DEPENDS "${_aros_genexport_stamp}")
+endfunction()
+
 function(aros_register_genmodule_module target_name)
   set(_options
     ARCHSPECIFIC
@@ -1676,6 +1747,8 @@ function(aros_register_genmodule_module target_name)
   _aros_read_config_tokens("TARGET_C_LIBS" _aros_module_target_c_libs)
   _aros_collect_link_library_names(_aros_module_target_c_lib_names ${_aros_module_target_c_libs})
   _aros_collect_link_library_names(_aros_module_option_link_lib_names ${AROS_MODULE_LINK_OPTIONS})
+  _aros_conf_has_option("${AROS_MODULE_MODULE_CONF}" "noautolib" _aros_module_has_noautolib)
+  _aros_conf_has_option("${AROS_MODULE_MODULE_CONF}" "noresident" _aros_module_has_noresident)
 
   _aros_encode_list("${AROS_MODULE_BASE_SOURCES}" _aros_module_base_sources)
   _aros_encode_list("${AROS_MODULE_LAYER_OVERRIDES}" _aros_module_layer_overrides)
@@ -1684,17 +1757,35 @@ function(aros_register_genmodule_module target_name)
   _aros_encode_list("${AROS_MODULE_INCLUDE_DIRS}" _aros_module_include_dirs)
   _aros_encode_list("${AROS_MODULE_COMPILE_DEFINITIONS}" _aros_module_compile_definitions)
   _aros_encode_list("${AROS_MODULE_COMPILE_OPTIONS}" _aros_module_compile_options)
-  _aros_encode_list("${AROS_MODULE_LINK_OPTIONS}" _aros_module_link_options)
+  set(_aros_module_resolved_link_options ${AROS_MODULE_LINK_OPTIONS})
   set(_aros_module_resolved_link_libs ${AROS_MODULE_LINK_LIBS})
   if(AROS_COMPILER_NATIVE_MODULE_LINKLIBS)
     list(APPEND _aros_module_resolved_link_libs ${AROS_COMPILER_NATIVE_MODULE_LINKLIBS})
   endif()
+  if(_aros_module_has_noresident)
+    list(FIND AROS_MODULE_LINK_LIBS "exec" _aros_module_explicit_exec_index)
+    if(_aros_module_explicit_exec_index EQUAL -1)
+      list(REMOVE_ITEM _aros_module_resolved_link_libs exec)
+    endif()
+    list(APPEND _aros_module_resolved_link_options
+      "-nosysbase"
+      "-Wl,--defsym"
+      "-Wl,SysBase=0x4"
+    )
+  endif()
   list(REMOVE_DUPLICATES _aros_module_resolved_link_libs)
   _aros_encode_list("${_aros_module_resolved_link_libs}" _aros_module_link_libs)
-  _aros_encode_list("${AROS_COMPILER_NATIVE_MODULE_AUTOLIBS}" _aros_module_auto_link_libs)
+  list(REMOVE_DUPLICATES _aros_module_resolved_link_options)
+  _aros_encode_list("${_aros_module_resolved_link_options}" _aros_module_link_options)
+  set(_aros_module_resolved_auto_link_libs ${AROS_COMPILER_NATIVE_MODULE_AUTOLIBS})
+  if(_aros_module_has_noautolib)
+    set(_aros_module_resolved_auto_link_libs)
+  endif()
+  list(REMOVE_DUPLICATES _aros_module_resolved_auto_link_libs)
+  _aros_encode_list("${_aros_module_resolved_auto_link_libs}" _aros_module_auto_link_libs)
 
   set(_aros_module_archive_dep_names ${_aros_module_resolved_link_libs})
-  list(APPEND _aros_module_archive_dep_names ${AROS_COMPILER_NATIVE_MODULE_AUTOLIBS})
+  list(APPEND _aros_module_archive_dep_names ${_aros_module_resolved_auto_link_libs})
   list(APPEND _aros_module_archive_dep_names ${_aros_module_target_c_lib_names})
   list(APPEND _aros_module_archive_dep_names ${_aros_module_option_link_lib_names})
   list(REMOVE_DUPLICATES _aros_module_archive_dep_names)

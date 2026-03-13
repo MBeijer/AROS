@@ -45,7 +45,9 @@ function(aros_layering_get_target_context out_arch out_cpu out_variant out_famil
 
   _aros_layering_get_config_build_dir(_config_build_dir)
   set(_target_cfg "${_config_build_dir}/bin/${AROS_TARGET}/gen/config/target.cfg")
-  if(EXISTS "${_target_cfg}")
+  if(DEFINED AROS_TARGET_FAMILY AND NOT AROS_TARGET_FAMILY STREQUAL "")
+    set(_family_line "FAMILY := ${AROS_TARGET_FAMILY}")
+  elseif(EXISTS "${_target_cfg}")
     file(STRINGS "${_target_cfg}" _family_line REGEX "^FAMILY[ \t]*:=")
   endif()
   if(_family_line)

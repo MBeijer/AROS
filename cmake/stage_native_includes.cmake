@@ -165,6 +165,23 @@ function(_aros_publish_root_include_aliases source_relative_dir)
   endforeach()
 endfunction()
 
+function(_aros_publish_root_include_alias source_relative_path alias_name)
+  set(_source_path "${AROS_NATIVE_INCLUDE_DIR}/${source_relative_path}")
+  if(NOT EXISTS "${_source_path}")
+    return()
+  endif()
+
+  set(_dest_path "${AROS_NATIVE_INCLUDE_DIR}/${alias_name}")
+  file(RELATIVE_PATH _source_link_target
+    "${AROS_NATIVE_INCLUDE_DIR}"
+    "${_source_path}"
+  )
+  if(EXISTS "${_dest_path}" OR IS_SYMLINK "${_dest_path}")
+    return()
+  endif()
+  file(CREATE_LINK "${_source_link_target}" "${_dest_path}" SYMBOLIC COPY_ON_ERROR)
+endfunction()
+
 function(_aros_reset_root_include_aliases)
   foreach(_source_relative_dir IN LISTS ARGN)
     set(_source_dir "${AROS_NATIVE_INCLUDE_DIR}/${_source_relative_dir}")
@@ -413,12 +430,14 @@ endforeach()
 # effect when rebuilding an existing directory.
 _aros_reset_root_include_aliases("aros/posixc" "aros/stdc" "dos")
 
-# Keep stdc/posixc resolution in their namespaced trees. Publishing every
-# header from those directories at the root manufactures headers like
-# <ctype.h> that do not exist in the legacy target SDK and changes which
-# API surface wins during native module builds. Keep only the dos aliases
-# that some sources still include directly as <dos.h>.
-_aros_publish_root_include_aliases("dos")
+# The legacy SDK publishes a mixed flat header surface: most C headers come
+# from aros/stdc first, the remaining POSIX headers fall back to aros/posixc,
+# and a few historical DOS aliases (notably <dos.h>) live at the root.
+# Recreate that root view without letting unrelated dos/* headers shadow the
+# C runtime surface.
+_aros_publish_root_include_aliases("aros/stdc")
+_aros_publish_root_include_aliases("aros/posixc")
+_aros_publish_root_include_alias("dos/dos.h" "dos.h")
 
 _aros_generate_execbase_header()
 _aros_generate_arch_libcall_header()

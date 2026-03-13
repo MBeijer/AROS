@@ -108,10 +108,10 @@ Constraint: avoid changing legacy build scripts/sources unless absolutely requir
   - They should expose active layer directories, module/user include dirs from `USER_INCLUDES`, active-layer `make.opts` include additions, and `%get_archincludes` results where applicable.
   - `CURDIR` / `MAINDIR` token expansion matters for that configure-time include surface just as it does in the build-time mmake parser.
 - A clean-clone CMake configure cannot assume `legacy-main/bin/<target>/gen/config/target.cfg` already exists.
-  - Native module registration parses legacy mmake/config metadata during CMake configure, so the root CMake configure path must bootstrap the legacy `configure` step early enough to create the first-pass config files in `legacy-main`.
-  - The correct first-pass outputs from legacy `configure` are the core config files such as `target.cfg`, `build.cfg`, `conf.cmake`, `make.defaults`, `config/make.cfg`, and `mmake.config`.
-  - `compiler.cfg` is not a guaranteed first-pass `configure` output, so bootstrap validation must not require it.
-  - `_aros_get_target_context()` should also tolerate a missing `target.cfg` and fall back to the `AROS_TARGET` arch/family split instead of hard-failing the whole CMake configure.
+  - Native module registration parses legacy-style mmake/config metadata during CMake configure, so CMake must synthesize a small bootstrap config surface itself before any native module registration runs.
+  - Current CMake-side bootstrap snapshot writes `config/make.cfg`, `gen/config/target.cfg`, `gen/config/build.cfg`, and `gen/config/compiler.cfg` under `legacy-main` without invoking legacy `./configure`.
+  - That snapshot is only for CMake-time metadata consumption; the real `aros-configure` build target still runs legacy `./configure` later and replaces it with the full historical outputs (`Makefile`, `config.status`, `mmake.config`, `conf.cmake`, `make.defaults`, and the rest).
+  - `_aros_get_target_context()` and the layering helpers should prefer the CMake-derived `AROS_TARGET_FAMILY` when available and tolerate a missing real `target.cfg` instead of hard-failing the whole CMake configure.
 - Current concrete blocker for `aros-rom-exec-native` is generated-header fidelity, not legacy build behavior:
   - `compiler/include/mmakefile.src` rewrites `exec/execbase.h` with `sed` for the SMP/private-field layout.
   - current native include staging still copies `compiler/include/exec/execbase.inc` too literally.
@@ -200,6 +200,7 @@ Constraint: avoid changing legacy build scripts/sources unless absolutely requir
 - Remove the need for manual `AROS_ROM_NATIVE_INTERFACE_MODULES` cache expansion by making the ROM interface-producer discovery/cached-default migration robust for existing build directories.
 - Continue building native crosstools from CMake only as needed to unblock ROM-native targets; do not change legacy crosstools or legacy build logic.
 - Use `rom/mmakefile.src` build ordering, `#MM ...-includes`, and `%get_archincludes`-resolved include producers to drive reusable CMake `INTERFACE` graphs for ROM modules, with `exec` treated as an early include producer.
+- After all ROM modules are migrated, refactor [`rom/CMakeLists.txt`](/home/marlon/nfs/storage/projects/amiga/aros/rom/CMakeLists.txt) into a cleaner structure. The current file is transitional and should not remain as a long-term dumping ground for per-module registration clutter.
 - Rerun full parity from the active out-of-tree build dir:
   - `cmake --build <build-dir> --target aros-output-parity-compare`
 - Validate parity now runs with layer-correct crosstools behavior:
@@ -388,3 +389,17 @@ Hard rule: when a CMake design only solves one module and does not clearly gener
 Hard rule: keep `AGENTS.md` updated with new migration-relevant findings, blockers, and user guidance during the session.
 Hard rule: when the user provides information that changes build understanding or migration direction, record it in `AGENTS.md`.
 Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and use module `#MM ...-includes` relationships to drive reusable CMake `INTERFACE` dependency graphs.
+- Current native include-staging finding:
+  - the flat native include root must mirror the legacy SDK header surface, not just copy trees opportunistically
+  - a concrete failure was `native-includes/stdio.h` incorrectly resolving to `dos/stdio.h`, which broke `udis86` consumers because `FILE` was not defined
+  - the correct root publication order is legacy-like C runtime first (`aros/stdc`), then POSIX fallbacks (`aros/posixc`), with only explicit historical DOS root aliases such as `dos.h`
+- Current verified native ROM state in `cmake-build-debug`:
+  - the current package-base native ROM/workbench surface builds in one serialized Ninja pass for:
+    `aros`, `battclock`, `bootloader`, `disk`, `dos`, `dosboot`, `exec`, `expansion`, `filesystem`, `filesys/ram`, `filesys/console_handler`, `graphics`, `hyperlayers`, `intuition`, `kernel`, `keymap`, `lddemon`, `devs/console`, `devs/gameport`, `devs/input`, `devs/keyboard`, `hidds/hidd`, `hidds/gfx`, `hidds/input`, `hidds/kbd`, `hidds/mouse`, `misc`, `oop`, `partition`, `utility`, `debug`, `processor`, `timer`, and `workbench/libs/gadtools`
+  - `rom/task` remains outside that green set because `GetTaskStorageSlot.c` and `GetParentTaskStorageSlot.c` both leave `TaskGetStorageSlot` unresolved in the generated objects, and the current legacy reference tree does not contain a `task.resource` artifact either
+- Additional verified native HIDD state in `cmake-build-debug`:
+  - `rom/hidds/pci` is now registered through the generic genmodule path and builds as `bin/linux-x86_64/AROS/Devs/Drivers/pci.hidd`
+  - the current legacy reference tree does not contain a matching `pci.hidd` artifact yet, so there is not a parity compare for it yet
+- Current cache/migration caveat:
+  - existing `cmake-build-debug` trees may need an explicit `AROS_ROM_NATIVE_MODULES` cache update when a newly migrated ROM module is added
+  - that cache-upgrade behavior should be cleaned up when `rom/CMakeLists.txt` gets its dedicated post-migration cleanup pass

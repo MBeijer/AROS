@@ -33,6 +33,7 @@ option(AROS_BUILD_ADFLIB "Build tools/ADFlib with CMake" ON)
 option(AROS_BUILD_FLEXCAT "Build tools/flexcat with CMake" ON)
 option(AROS_BUILD_LHA "Build tools/lha with CMake" ON)
 
+include("${CMAKE_SOURCE_DIR}/cmake/AROSConfigSnapshot.cmake")
 include("${CMAKE_SOURCE_DIR}/cmake/AROSModule.cmake")
 # START LEGACY: compatibility bridge options for legacy MetaMake/make flow.
 set(AROS_LEGACY_BUILD_DIR "${CMAKE_BINARY_DIR}/legacy-main" CACHE PATH "Build directory used for legacy configure+make wrapper targets")
@@ -202,6 +203,17 @@ set(AROS_CONFIGURE_TARGET_CFG "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/c
 set(AROS_CONFIGURE_MMAKE_CONFIG "${AROS_LEGACY_BUILD_DIR}/mmake.config")
 set(_aros_append_mmake_ignoredirs_script "${CMAKE_SOURCE_DIR}/cmake/append_mmake_ignoredirs.cmake")
 set(_aros_run_legacy_configure_script "${CMAKE_SOURCE_DIR}/cmake/run_legacy_configure.cmake")
+string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" _aros_host_arch)
+set(_aros_host_cpu "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+if(NOT _aros_host_cpu)
+  set(_aros_host_cpu "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+if(NOT _aros_host_cpu)
+  set(_aros_host_cpu "unknown")
+endif()
+aros_determine_target_context("${AROS_TARGET}" _aros_target_arch _aros_target_cpu _aros_target_variant _aros_target_family)
+set(AROS_TARGET_FAMILY "${_aros_target_family}" CACHE INTERNAL
+  "Derived target family used by CMake-native layering and module resolution")
 set(_aros_configure_required_outputs
   "${AROS_LEGACY_BUILD_DIR}/Makefile"
   "${AROS_LEGACY_BUILD_DIR}/config.status"
@@ -215,63 +227,58 @@ set(_aros_configure_required_outputs
 set(_aros_list_sep "__AROS_LIST_SEP__")
 string(REPLACE ";" "${_aros_list_sep}" _aros_configure_cli_args_encoded "${_aros_configure_cli_args}")
 string(REPLACE ";" "${_aros_list_sep}" _aros_configure_required_outputs_encoded "${_aros_configure_required_outputs}")
-set(_aros_configure_bootstrap_state_file "${CMAKE_BINARY_DIR}/.cmake-aros-configure-bootstrap-state.txt")
-string(JOIN "\n" _aros_configure_bootstrap_state
+set(_aros_bootstrap_snapshot_state_file "${CMAKE_BINARY_DIR}/.cmake-aros-configure-bootstrap-state.txt")
+set(_aros_bootstrap_snapshot_toolchain_dir "${_aros_effective_toolchain_install_dir}")
+if(NOT _aros_bootstrap_snapshot_toolchain_dir)
+  set(_aros_bootstrap_snapshot_toolchain_dir "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/tools/crosstools")
+endif()
+string(JOIN "\n" _aros_bootstrap_snapshot_state
   "AROS_TARGET=${AROS_TARGET}"
   "AROS_LEGACY_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}"
-  "AROS_CONFIGURE_ARGS=${_aros_configure_cli_args_encoded}"
+  "AROS_EFFECTIVE_TOOLCHAIN_INSTALL_DIR=${_aros_bootstrap_snapshot_toolchain_dir}"
+  "AROS_HOST_ARCH=${_aros_host_arch}"
+  "AROS_HOST_CPU=${_aros_host_cpu}"
+  "AROS_TARGET_FAMILY=${_aros_target_family}"
 )
 
-set(_aros_bootstrap_config_needed FALSE)
-foreach(_aros_required_output IN LISTS _aros_configure_required_outputs)
-  if(NOT EXISTS "${_aros_required_output}")
-    set(_aros_bootstrap_config_needed TRUE)
+set(_aros_bootstrap_snapshot_outputs
+  "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
+  "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
+  "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
+  "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/compiler.cfg"
+)
+set(_aros_bootstrap_snapshot_needed FALSE)
+foreach(_aros_snapshot_output IN LISTS _aros_bootstrap_snapshot_outputs)
+  if(NOT EXISTS "${_aros_snapshot_output}")
+    set(_aros_bootstrap_snapshot_needed TRUE)
     break()
   endif()
 endforeach()
 
-if(NOT _aros_bootstrap_config_needed)
-  foreach(_aros_config_input IN ITEMS
-      "${CMAKE_SOURCE_DIR}/configure"
-      "${CMAKE_SOURCE_DIR}/configure.in"
-      "${CMAKE_SOURCE_DIR}/Makefile.in"
-      "${_aros_append_mmake_ignoredirs_script}"
-      "${_aros_run_legacy_configure_script}")
-    if("${_aros_config_input}" IS_NEWER_THAN "${AROS_CONFIGURE_TARGET_CFG}")
-      set(_aros_bootstrap_config_needed TRUE)
-      break()
-    endif()
-  endforeach()
-endif()
-
-if(NOT _aros_bootstrap_config_needed)
-  if(EXISTS "${_aros_configure_bootstrap_state_file}")
-    file(READ "${_aros_configure_bootstrap_state_file}" _aros_existing_configure_bootstrap_state)
+if(NOT _aros_bootstrap_snapshot_needed)
+  if(EXISTS "${_aros_bootstrap_snapshot_state_file}")
+    file(READ "${_aros_bootstrap_snapshot_state_file}" _aros_existing_bootstrap_snapshot_state)
+  elseif(EXISTS "${AROS_LEGACY_BUILD_DIR}/config.status")
+    set(_aros_existing_bootstrap_snapshot_state "${_aros_bootstrap_snapshot_state}\n")
+    file(WRITE "${_aros_bootstrap_snapshot_state_file}" "${_aros_bootstrap_snapshot_state}\n")
   else()
-    set(_aros_existing_configure_bootstrap_state "")
+    set(_aros_existing_bootstrap_snapshot_state "")
   endif()
-  if(NOT _aros_existing_configure_bootstrap_state STREQUAL "${_aros_configure_bootstrap_state}\n")
-    set(_aros_bootstrap_config_needed TRUE)
+  if(NOT _aros_existing_bootstrap_snapshot_state STREQUAL "${_aros_bootstrap_snapshot_state}\n")
+    set(_aros_bootstrap_snapshot_needed TRUE)
   endif()
 endif()
 
-if(_aros_bootstrap_config_needed)
-  message(STATUS "Bootstrapping legacy configure metadata in ${AROS_LEGACY_BUILD_DIR}")
-  execute_process(
-    COMMAND "${CMAKE_COMMAND}"
-            "-DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
-            "-DAROS_ACTIVE_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}"
-            "-DAROS_CONFIGURE_ARGS_ENCODED=${_aros_configure_cli_args_encoded}"
-            "-DAROS_REQUIRED_OUTPUTS_ENCODED=${_aros_configure_required_outputs_encoded}"
-            "-DAROS_LIST_SEP=${_aros_list_sep}"
-            -P "${_aros_run_legacy_configure_script}"
-    COMMAND_ECHO STDOUT
-    RESULT_VARIABLE _aros_bootstrap_config_result
+if(_aros_bootstrap_snapshot_needed)
+  message(STATUS "Generating CMake bootstrap config snapshot in ${AROS_LEGACY_BUILD_DIR}")
+  aros_write_bootstrap_config_snapshot(
+    BUILD_DIR "${AROS_LEGACY_BUILD_DIR}"
+    TARGET "${AROS_TARGET}"
+    TOOLCHAIN_DIR "${_aros_bootstrap_snapshot_toolchain_dir}"
+    HOST_ARCH "${_aros_host_arch}"
+    HOST_CPU "${_aros_host_cpu}"
   )
-  if(NOT _aros_bootstrap_config_result EQUAL 0)
-    message(FATAL_ERROR "Failed bootstrapping legacy configure metadata in ${AROS_LEGACY_BUILD_DIR}")
-  endif()
-  file(WRITE "${_aros_configure_bootstrap_state_file}" "${_aros_configure_bootstrap_state}\n")
+  file(WRITE "${_aros_bootstrap_snapshot_state_file}" "${_aros_bootstrap_snapshot_state}\n")
 endif()
 
 add_custom_command(

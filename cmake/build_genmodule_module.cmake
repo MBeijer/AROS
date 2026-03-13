@@ -83,6 +83,26 @@ function(_aros_tokenize_mmake_value input_value out_var)
   set(${out_var} "${_tokens}" PARENT_SCOPE)
 endfunction()
 
+function(_aros_encode_token_list input_list out_var)
+  if("${input_list}" STREQUAL "")
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  string(REPLACE ";" "__AROS_TOKEN_LIST_SEP__" _encoded "${input_list}")
+  set(${out_var} "${_encoded}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_decode_token_list input_value out_var)
+  if("${input_value}" STREQUAL "")
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  string(REPLACE "__AROS_TOKEN_LIST_SEP__" ";" _decoded "${input_value}")
+  set(${out_var} "${_decoded}" PARENT_SCOPE)
+endfunction()
+
 function(_aros_remove_flag_pair var_name flag value)
   if(NOT DEFINED ${var_name} OR "${${var_name}}" STREQUAL "")
     set(${var_name} "" PARENT_SCOPE)
@@ -1132,7 +1152,7 @@ function(_aros_parse_mmake_module file_path)
         )
         _aros_remove_empty_entries(_archspec_c_compile_args)
         if(_archspec_c_compile_args)
-          list(JOIN _archspec_c_compile_args " " _archspec_c_compile_args_string)
+          _aros_encode_token_list("${_archspec_c_compile_args}" _archspec_c_compile_args_string)
           foreach(_archspec_source IN LISTS _archspec_files)
             list(APPEND _module_mmake_arch_source_flag_specs
               "${_archspec_source}|${_archspec_c_compile_args_string}"
@@ -1147,7 +1167,7 @@ function(_aros_parse_mmake_module file_path)
         )
         _aros_remove_empty_entries(_archspec_asm_compile_args)
         if(_archspec_asm_compile_args)
-          list(JOIN _archspec_asm_compile_args " " _archspec_asm_compile_args_string)
+          _aros_encode_token_list("${_archspec_asm_compile_args}" _archspec_asm_compile_args_string)
           foreach(_archspec_source IN LISTS _archspec_asmfiles)
             list(APPEND _module_mmake_arch_source_flag_specs
               "${_archspec_source}|${_archspec_asm_compile_args_string}"
@@ -1156,9 +1176,11 @@ function(_aros_parse_mmake_module file_path)
         endif()
 
         if(DEFINED _AROS_MMAKE_VAR_ISA_FLAGS AND NOT "${_AROS_MMAKE_VAR_ISA_FLAGS}" STREQUAL "")
+          _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_ISA_FLAGS}" _archspec_isa_flags)
+          _aros_encode_token_list("${_archspec_isa_flags}" _archspec_isa_flags_string)
           foreach(_archspec_source IN LISTS _archspec_files _archspec_asmfiles)
             list(APPEND _module_mmake_arch_source_flag_specs
-              "${_archspec_source}|${_AROS_MMAKE_VAR_ISA_FLAGS}"
+              "${_archspec_source}|${_archspec_isa_flags_string}"
             )
           endforeach()
         endif()
@@ -1255,7 +1277,7 @@ function(_aros_parse_mmake_module file_path)
       endif()
       _aros_remove_empty_entries(_rule_compile_args)
       if(_rule_compile_args)
-        list(JOIN _rule_compile_args " " _rule_compile_args_string)
+        _aros_encode_token_list("${_rule_compile_args}" _rule_compile_args_string)
         foreach(_rule_source IN LISTS _rule_basenames)
           list(APPEND _module_mmake_arch_source_flag_specs
             "${_rule_source}|${_rule_compile_args_string}"
@@ -1264,9 +1286,11 @@ function(_aros_parse_mmake_module file_path)
       endif()
 
       if(DEFINED _AROS_MMAKE_VAR_ISA_FLAGS AND NOT "${_AROS_MMAKE_VAR_ISA_FLAGS}" STREQUAL "")
+        _aros_tokenize_mmake_value("${_AROS_MMAKE_VAR_ISA_FLAGS}" _rule_isa_flags)
+        _aros_encode_token_list("${_rule_isa_flags}" _rule_isa_flags_string)
         foreach(_rule_source IN LISTS _rule_basenames)
           list(APPEND _module_mmake_arch_source_flag_specs
-            "${_rule_source}|${_AROS_MMAKE_VAR_ISA_FLAGS}"
+            "${_rule_source}|${_rule_isa_flags_string}"
           )
         endforeach()
       endif()
@@ -1726,7 +1750,7 @@ if(DEFINED MODULE_MMAKEFILE AND NOT MODULE_MMAKEFILE STREQUAL "")
           set(_module_layer_source_compile_args "${_module_layer_source_asm_compile_args}")
         endif()
         if(_module_layer_source_compile_args)
-          list(JOIN _module_layer_source_compile_args " " _module_layer_source_compile_args_string)
+          _aros_encode_token_list("${_module_layer_source_compile_args}" _module_layer_source_compile_args_string)
           list(APPEND MODULE_LAYER_SOURCE_FLAG_SPECS
             "${_module_layer}:${_layer_source}|${_module_layer_source_compile_args_string}"
           )
@@ -1900,6 +1924,37 @@ _aros_remove_empty_entries(_module_generated_linklib_cflags)
 _aros_debug_var(_module_start_files)
 _aros_debug_var(_module_end_files)
 _aros_debug_var(_module_sources)
+set(_module_generated_start_sources)
+foreach(_module_start_file IN LISTS _module_start_files)
+  set(_module_generated_start_source "${MODULE_GENERATED_DIR}/${_module_start_file}.c")
+  if(EXISTS "${_module_generated_start_source}")
+    list(APPEND _module_generated_start_sources "${_module_generated_start_source}")
+  endif()
+endforeach()
+
+set(_module_generated_start_uses_autoinit FALSE)
+set(_module_generated_start_uses_libinit FALSE)
+foreach(_module_generated_start_source IN LISTS _module_generated_start_sources)
+  file(STRINGS "${_module_generated_start_source}" _module_generated_start_autoinit_lines
+    REGEX
+      "set_open_libraries\\(|set_call_funcs\\(|set_call_devfuncs\\(|__showerror\\b|THIS_PROGRAM_HANDLES_SYMBOLSET\\((INIT|EXIT|PROGRAM_ENTRIES|CTORS|DTORS|INIT_ARRAY|FINI_ARRAY)\\)|DECLARESET\\((INIT|EXIT|PROGRAM_ENTRIES|CTORS|DTORS|INIT_ARRAY|FINI_ARRAY)\\)|AROS_USERFUNC_(INIT|EXIT)"
+  )
+  if(_module_generated_start_autoinit_lines)
+    set(_module_generated_start_uses_autoinit TRUE)
+  endif()
+
+  file(STRINGS "${_module_generated_start_source}" _module_generated_start_libinit_lines
+    REGEX
+      "set_call_libfuncs\\(|THIS_PROGRAM_HANDLES_SYMBOLSET\\((INITLIB|OPENLIB|CLOSELIB|EXPUNGELIB)\\)|DECLARESET\\((INITLIB|OPENLIB|CLOSELIB|EXPUNGELIB)\\)|AROS_(LIB|DEV)FUNC_(INIT|EXIT)"
+  )
+  if(_module_generated_start_libinit_lines)
+    set(_module_generated_start_uses_libinit TRUE)
+  endif()
+
+  if(_module_generated_start_uses_autoinit AND _module_generated_start_uses_libinit)
+    break()
+  endif()
+endforeach()
 set(_module_deflibdefs "${MODULE_GENERATED_DIR}/include/${MODULE_NAME}_deflibdefs.h")
 file(WRITE "${_module_deflibdefs}" "#define LC_LIBDEFS_FILE \"${MODULE_GENERATED_DIR}/${MODULE_NAME}_libdefs.h\"\n")
 
@@ -1970,6 +2025,31 @@ list(APPEND _module_linklib_compile_args ${_module_generated_linklib_cflags})
 
 set(_common_asm_compile_args ${_common_compile_args})
 list(APPEND _common_asm_compile_args ${_module_config_aflags})
+
+set(_hosted_layer_asm_compile_args ${_common_asm_compile_args})
+_aros_remove_token_entries(_hosted_layer_asm_compile_args "-I${AROS_NATIVE_INCLUDE_DIR}")
+_aros_remove_flag_pair(_hosted_layer_asm_compile_args "-isystem" "${AROS_NATIVE_INCLUDE_DIR}/aros/posixc")
+_aros_remove_flag_pair(_hosted_layer_asm_compile_args "-isystem" "${AROS_NATIVE_INCLUDE_DIR}/aros/stdc")
+list(APPEND _hosted_layer_asm_compile_args "-idirafter" "${AROS_NATIVE_INCLUDE_DIR}")
+
+set(_layer_source_compile_args_template ${_common_compile_args})
+set(_hosted_layer_source_compile_args_template ${_hosted_layer_compile_args})
+set(_layer_asm_source_compile_args_template ${_common_asm_compile_args})
+set(_hosted_layer_asm_source_compile_args_template ${_hosted_layer_asm_compile_args})
+set(_module_user_compile_tokens
+  ${_module_mmake_user_cppflags}
+  ${_module_mmake_user_includes}
+  ${_module_mmake_user_cflags}
+  ${_module_mmake_user_aflags}
+  ${_module_mmake_optimization_cflags}
+)
+_aros_remove_empty_entries(_module_user_compile_tokens)
+if(_module_user_compile_tokens)
+  _aros_remove_token_entries(_layer_source_compile_args_template ${_module_user_compile_tokens})
+  _aros_remove_token_entries(_hosted_layer_source_compile_args_template ${_module_user_compile_tokens})
+  _aros_remove_token_entries(_layer_asm_source_compile_args_template ${_module_user_compile_tokens})
+  _aros_remove_token_entries(_hosted_layer_asm_source_compile_args_template ${_module_user_compile_tokens})
+endif()
 
 if(DEFINED MODULE_SUFFIX AND NOT MODULE_SUFFIX STREQUAL "")
   set(_module_linklib_suffix ".${MODULE_SUFFIX}")
@@ -2105,11 +2185,20 @@ foreach(_source IN LISTS _module_sources)
   get_filename_component(_source_ext "${_source}" EXT)
   set(_object "${MODULE_OBJ_DIR}/${_basename}.o")
   set(_source_compile_args ${_common_compile_args})
+  if(_source MATCHES "/arch/")
+    set(_source_compile_args ${_layer_source_compile_args_template})
+  endif()
   if(_source MATCHES "/arch/(all-(unix|hosted)|[^/]+-(unix|hosted))/")
-    set(_source_compile_args ${_hosted_layer_compile_args})
+    set(_source_compile_args ${_hosted_layer_source_compile_args_template})
   endif()
   if(_source_ext STREQUAL ".s" OR _source_ext STREQUAL ".S")
     set(_source_compile_args ${_common_asm_compile_args})
+    if(_source MATCHES "/arch/")
+      set(_source_compile_args ${_layer_asm_source_compile_args_template})
+    endif()
+    if(_source MATCHES "/arch/(all-(unix|hosted)|[^/]+-(unix|hosted))/")
+      set(_source_compile_args ${_hosted_layer_asm_source_compile_args_template})
+    endif()
   endif()
   foreach(_layer_source_flag_spec IN LISTS MODULE_LAYER_SOURCE_FLAG_SPECS)
     string(REPLACE "|" ";" _layer_source_flag_parts "${_layer_source_flag_spec}")
@@ -2136,7 +2225,7 @@ foreach(_source IN LISTS _module_sources)
     if(NOT _source STREQUAL "${_layer_source_flag_path}")
       continue()
     endif()
-    separate_arguments(_layer_source_extra_compile_args NATIVE_COMMAND "${_layer_source_flag_value}")
+    _aros_decode_token_list("${_layer_source_flag_value}" _layer_source_extra_compile_args)
     list(APPEND _source_compile_args ${_layer_source_extra_compile_args})
   endforeach()
   if(DEFINED AROS_GENMODULE_DEBUG AND AROS_GENMODULE_DEBUG)
@@ -2191,6 +2280,13 @@ endforeach()
 set(_module_effective_link_libs ${_module_manual_link_libs})
 list(APPEND _module_effective_link_libs ${_module_available_auto_link_libs})
 list(REMOVE_DUPLICATES _module_effective_link_libs)
+list(FIND _module_effective_link_libs "exec" _module_exec_link_index)
+list(FIND _module_mmake_uselibs "autoinit" _module_autoinit_explicit_index)
+if(NOT _module_generated_start_uses_autoinit
+   AND _module_autoinit_explicit_index EQUAL -1
+   AND _module_exec_link_index EQUAL -1)
+  list(REMOVE_ITEM _module_effective_link_libs autoinit)
+endif()
 _aros_debug_var(_module_objects)
 _aros_debug_var(_module_link_objects)
 _aros_debug_var(_module_manual_link_libs)
@@ -2203,6 +2299,7 @@ set(_link_command
 )
 list(APPEND _link_command ${_module_target_isa_ldflags})
 list(APPEND _link_command ${_module_nostartup_ldflags})
+list(APPEND _link_command ${_module_nostdlib_ldflags})
 list(APPEND _link_command ${_module_nostartup_objects})
 list(APPEND _link_command ${_module_link_objects})
 list(APPEND _link_command -o "${MODULE_OUTPUT}")

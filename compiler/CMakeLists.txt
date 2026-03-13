@@ -16,9 +16,11 @@ set(
   "Semicolon-separated compiler linklibs enabled for native CMake migration"
 )
 set(_aros_compiler_native_module_linklibs_legacy_default "amiga;arossupport;stdc.static;libinit;autoinit")
-set(_aros_compiler_native_module_linklibs_default "amiga;arossupport;stdc.static;autoinit;libinit")
+set(_aros_compiler_native_module_linklibs_previous_default "amiga;arossupport;stdc.static;autoinit;libinit")
+set(_aros_compiler_native_module_linklibs_default "amiga;arossupport;stdc.static;exec;autoinit;libinit")
 if(DEFINED AROS_COMPILER_NATIVE_MODULE_LINKLIBS
-   AND AROS_COMPILER_NATIVE_MODULE_LINKLIBS STREQUAL "${_aros_compiler_native_module_linklibs_legacy_default}")
+   AND (AROS_COMPILER_NATIVE_MODULE_LINKLIBS STREQUAL "${_aros_compiler_native_module_linklibs_legacy_default}"
+        OR AROS_COMPILER_NATIVE_MODULE_LINKLIBS STREQUAL "${_aros_compiler_native_module_linklibs_previous_default}"))
   set(AROS_COMPILER_NATIVE_MODULE_LINKLIBS "${_aros_compiler_native_module_linklibs_default}" CACHE STRING
     "Semicolon-separated default linklibs added to native genmodule-backed module links" FORCE)
 endif()
