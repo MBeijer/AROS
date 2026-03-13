@@ -396,6 +396,10 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
   - on a clean Ninja build directory, `AROS_TARGET_CC` may still be empty at CMake generate time even though the crosstools target will later provide the compiler
   - native include staging must therefore resolve the target compiler at execution time from the toolchain dir/prefix instead of assuming the configure-time `AROS_TARGET_CC` value is already populated
   - concrete case: CLion/Ninja clean builds were failing in `stage_native_includes.cmake` while generating `asm.h`; the shared fix is to pass toolchain dir/prefix and let the staging script find `${triplet}-gcc` itself
+- Current clean-build genmodule-export finding:
+  - `run_genmodule_exports.cmake` must precreate the include subdirectories that `genmodule writeincludes` writes into on a clean tree
+  - the shared required set confirmed so far is: `proto/`, `inline/`, `defines/`, `clib/`, and `interface/`
+  - concrete case: clean CLion/Ninja builds were failing in `aros-rom-kernel-clocksource-exports-native` because `proto/clocksource.h` could not be opened when only the root export dir existed
 - Current native include-staging finding:
   - the flat native include root must mirror the legacy SDK header surface, not just copy trees opportunistically
   - a concrete failure was `native-includes/stdio.h` incorrectly resolving to `dos/stdio.h`, which broke `udis86` consumers because `FILE` was not defined

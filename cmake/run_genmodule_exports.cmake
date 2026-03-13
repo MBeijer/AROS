@@ -45,6 +45,15 @@ foreach(_output_dir IN LISTS _writeincludes_dirs)
   if(_output_dir STREQUAL "")
     continue()
   endif()
+  foreach(_include_subdir IN ITEMS proto inline defines clib interface)
+    file(MAKE_DIRECTORY "${_output_dir}/${_include_subdir}")
+  endforeach()
+endforeach()
+
+foreach(_output_dir IN LISTS _writeincludes_dirs)
+  if(_output_dir STREQUAL "")
+    continue()
+  endif()
   execute_process(
     COMMAND "${AROS_GENMODULE}"
             -c "${MODULE_CONF}"
