@@ -400,6 +400,11 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
   - `run_genmodule_exports.cmake` must precreate the include subdirectories that `genmodule writeincludes` writes into on a clean tree
   - the shared required set confirmed so far is: `proto/`, `inline/`, `defines/`, `clib/`, and `interface/`
   - concrete case: clean CLion/Ninja builds were failing in `aros-rom-kernel-clocksource-exports-native` because `proto/clocksource.h` could not be opened when only the root export dir existed
+- Current clean-build native runtime-order finding:
+  - late-bound native module ordering must be resolved only against real genmodule public-linklib producers discovered after registration order settles
+  - do not use autolibs, target C libs, or ordinary native linklib targets to create owner-target dependencies in the finalizer; that creates artificial cycles through the SDK/interface aggregate graph
+  - SDK-only registrations (`*-sdk-native`) must stay out of this runtime-order pass entirely
+  - concrete case: clean CLion/Ninja builds were failing in `aros-rom-aros-native` with `x86_64-aros-ld: cannot find -lexec` because `rom/aros` registered before `rom/exec`; the shared fix is to add a late dependency only on the `exec` genmodule producer, not on the wider archive/autolib universe
 - Current native include-staging finding:
   - the flat native include root must mirror the legacy SDK header surface, not just copy trees opportunistically
   - a concrete failure was `native-includes/stdio.h` incorrectly resolving to `dos/stdio.h`, which broke `udis86` consumers because `FILE` was not defined

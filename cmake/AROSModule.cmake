@@ -1966,6 +1966,13 @@ function(aros_register_genmodule_module target_name)
 
   add_custom_target("${target_name}" DEPENDS "${_aros_module_output}")
   add_custom_target("${_aros_module_native_abi_target}" DEPENDS "${_aros_module_output}")
+  if(NOT target_name MATCHES "-sdk-native$")
+    set_target_properties(
+      "${target_name}"
+      PROPERTIES
+        AROS_MODULE_RUNTIME_LINK_DEP_NAMES "${_aros_module_resolved_link_libs}"
+    )
+  endif()
   set(${target_name}_OUTPUT "${_aros_module_output}" PARENT_SCOPE)
   set(${target_name}_INTERFACES_TARGET "${target_name}-interfaces" PARENT_SCOPE)
   set(${target_name}_INTERFACE_LIBRARY_TARGET "${_aros_module_interface_target}" PARENT_SCOPE)
@@ -2341,6 +2348,43 @@ function(aros_finalize_module_interfaces)
       )
     endif()
 
+  endforeach()
+
+  foreach(_aros_interface_target IN LISTS _aros_registered_interface_targets)
+    if(NOT TARGET "${_aros_interface_target}")
+      continue()
+    endif()
+
+    get_target_property(_aros_interface_owner_target "${_aros_interface_target}" AROS_MODULE_OWNER_TARGET)
+    if(NOT _aros_interface_owner_target OR _aros_interface_owner_target STREQUAL "AROS_MODULE_OWNER_TARGET-NOTFOUND")
+      continue()
+    endif()
+
+    get_target_property(_aros_runtime_link_dep_names "${_aros_interface_owner_target}" AROS_MODULE_RUNTIME_LINK_DEP_NAMES)
+    if(NOT _aros_runtime_link_dep_names OR _aros_runtime_link_dep_names STREQUAL "AROS_MODULE_RUNTIME_LINK_DEP_NAMES-NOTFOUND")
+      continue()
+    endif()
+
+    set(_aros_runtime_dep_targets)
+    foreach(_aros_runtime_dep_name IN LISTS _aros_runtime_link_dep_names)
+      _aros_sanitize_property_key("${_aros_runtime_dep_name}" _aros_runtime_dep_key)
+      get_property(_aros_runtime_dep_target GLOBAL PROPERTY "AROS_REGISTERED_GENMODULE_PUBLIC_LINKLIB_TARGET_${_aros_runtime_dep_key}")
+      if(_aros_runtime_dep_target
+         AND TARGET "${_aros_runtime_dep_target}"
+         AND NOT _aros_runtime_dep_target STREQUAL "${_aros_interface_owner_target}")
+        list(APPEND _aros_runtime_dep_targets "${_aros_runtime_dep_target}")
+      endif()
+    endforeach()
+
+    list(REMOVE_DUPLICATES _aros_runtime_dep_targets)
+    if(_aros_runtime_dep_targets)
+      add_dependencies("${_aros_interface_owner_target}" ${_aros_runtime_dep_targets})
+      get_target_property(_aros_interface_owner_abi_target "${_aros_interface_target}" AROS_MODULE_OWNER_ABI_TARGET)
+      if(_aros_interface_owner_abi_target
+         AND NOT _aros_interface_owner_abi_target STREQUAL "AROS_MODULE_OWNER_ABI_TARGET-NOTFOUND")
+        add_dependencies("${_aros_interface_owner_abi_target}" ${_aros_runtime_dep_targets})
+      endif()
+    endif()
   endforeach()
 
   get_property(_aros_registered_linklib_targets GLOBAL PROPERTY AROS_REGISTERED_LINKLIB_TARGETS)
