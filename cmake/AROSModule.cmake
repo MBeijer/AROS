@@ -773,30 +773,41 @@ function(_aros_collect_registered_archive_dependencies out_files_var out_targets
       PROPERTY "AROS_REGISTERED_LINKLIB_TARGET_${_aros_lib_key}"
     )
 
-    if(NOT _registered_output)
-      get_property(
-        _registered_output
-        GLOBAL
-        PROPERTY "AROS_REGISTERED_GENMODULE_REL_LINKLIB_OUTPUT_${_aros_lib_key}"
-      )
+    if(NOT _registered_output AND _lib_name MATCHES "^(.+)_rel$")
+      _aros_sanitize_property_key("${CMAKE_MATCH_1}" _aros_module_name_key)
       get_property(
         _registered_target
         GLOBAL
-        PROPERTY "AROS_REGISTERED_GENMODULE_REL_LINKLIB_TARGET_${_aros_lib_key}"
+        PROPERTY "AROS_MODULE_NAME_INTERFACE_TARGET_${_aros_module_name_key}"
       )
+      if(_registered_target AND TARGET "${_registered_target}")
+        get_target_property(
+          _registered_output
+          "${_registered_target}"
+          AROS_MODULE_INTERFACE_STAMP
+        )
+        if(_registered_output STREQUAL "AROS_MODULE_INTERFACE_STAMP-NOTFOUND")
+          set(_registered_output "")
+        endif()
+      endif()
     endif()
 
     if(NOT _registered_output)
       get_property(
-        _registered_output
-        GLOBAL
-        PROPERTY "AROS_REGISTERED_GENMODULE_PUBLIC_LINKLIB_OUTPUT_${_aros_lib_key}"
-      )
-      get_property(
         _registered_target
         GLOBAL
-        PROPERTY "AROS_REGISTERED_GENMODULE_PUBLIC_LINKLIB_TARGET_${_aros_lib_key}"
+        PROPERTY "AROS_MODULE_NAME_INTERFACE_TARGET_${_aros_lib_key}"
       )
+      if(_registered_target AND TARGET "${_registered_target}")
+        get_target_property(
+          _registered_output
+          "${_registered_target}"
+          AROS_MODULE_INTERFACE_STAMP
+        )
+        if(_registered_output STREQUAL "AROS_MODULE_INTERFACE_STAMP-NOTFOUND")
+          set(_registered_output "")
+        endif()
+      endif()
     endif()
 
     if(_registered_output)
@@ -1861,10 +1872,6 @@ function(aros_register_genmodule_module target_name)
   set(_aros_module_interface_build_target_deps ${_aros_module_build_deps})
   list(APPEND _aros_module_interface_build_target_deps ${_aros_module_interface_dep_targets})
   list(REMOVE_DUPLICATES _aros_module_interface_build_target_deps)
-  set(_aros_module_interface_byproducts "${_aros_module_public_linklib_output}")
-  if(_aros_module_rel_linklib_output)
-    list(APPEND _aros_module_interface_byproducts "${_aros_module_rel_linklib_output}")
-  endif()
 
   set(_aros_module_runtime_build_file_deps
     "${_aros_module_interface_stamp}"
@@ -1877,7 +1884,6 @@ function(aros_register_genmodule_module target_name)
 
   add_custom_command(
     OUTPUT "${_aros_module_interface_stamp}"
-    BYPRODUCTS ${_aros_module_interface_byproducts}
     COMMAND "${CMAKE_COMMAND}"
             -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}

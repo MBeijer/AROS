@@ -429,6 +429,18 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - missing `hidd/compositor.h`
     - archive dependency cycles through `libgraphics.a`
     - bogus `classes/` source entries from `muimaster`
+- Current no-op rebuild finding:
+  - the reintroduced "always rebuild" behavior on settled native targets was caused by modeling genmodule public/`_rel` archives as declared interface byproducts and as direct runtime archive-file deps
+  - many modules do not actually emit a public archive in `INTERFACE_ONLY` mode, so declaring those archive paths as byproducts keeps Ninja considering the interface rules dirty forever
+  - the shared fix is:
+    - do not declare genmodule public/`_rel` archives as interface byproducts
+    - order genmodule module-to-module archive dependencies through the provider interface stamp instead of the archive file path
+  - verified result on the clean tree:
+    - `ninja -C /tmp/aros-clean-build-reuse -d explain aros-workbench-libs-gadtools-native` now reports `no work to do` apart from normal `VerifyGlobs.cmake_force`
+- Current clean-tree parity state after the no-op fix:
+  - `utility.library` from `/tmp/aros-clean-build-reuse` matches the legacy reference in size (`29600`) and is back in the ordinary byte-diff class rather than a structural size regression
+  - `graphics.library` from `/tmp/aros-clean-build-reuse` still has a real clean-tree parity regression: `210952` bytes vs legacy `211088`
+  - `gadtools.library` still has no matching artifact in the current legacy reference tree, so there is still no parity compare for it
 - Current native include-staging finding:
   - the flat native include root must mirror the legacy SDK header surface, not just copy trees opportunistically
   - a concrete failure was `native-includes/stdio.h` incorrectly resolving to `dos/stdio.h`, which broke `udis86` consumers because `FILE` was not defined
