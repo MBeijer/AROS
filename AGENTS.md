@@ -437,9 +437,38 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - order genmodule module-to-module archive dependencies through the provider interface stamp instead of the archive file path
   - verified result on the clean tree:
     - `ninja -C /tmp/aros-clean-build-reuse -d explain aros-workbench-libs-gadtools-native` now reports `no work to do` apart from normal `VerifyGlobs.cmake_force`
+- Current IDE/public-target naming rule:
+  - enable `USE_FOLDERS` and group native/public targets under `aros/...` while pushing migration/internal implementation targets under `aros/internal/...`
+  - keep legacy wrapper targets visibly prefixed as `mmake-*`
+  - expose human-facing native artifact targets as `<name>.<type>` (for example `exec.library`, `graphics.library`, `keyboard.device`)
+  - expose standalone linklib/native dependency targets with short names where possible (for example `amiga`, `arossupport`, `autoinit`, `libinit`)
+  - CMake `INTERFACE` targets can carry the short dependency names for authoring, but they are not independently buildable Ninja targets; that is a CMake limitation, not a graph bug
+- Current bootstrap-snapshot finding:
+  - the clean-tree bootstrap `compiler.cfg` must provide a broad compiler flag surface, not just a placeholder file
+  - missing `compiler.cfg` entries were causing clean native builds to silently drop mmake-derived flags such as `CFLAGS_NO_BUILTIN`, `CFLAGS_MERGE_CONSTANTS`, and the `NOWARN_*`/`WARN_*` family
+  - concrete clean-tree regression caused by this: `libstdc.static.a` was being rebuilt with the wrong codegen, which then propagated into `graphics.library`
+  - the bootstrap snapshot now versions its state so existing build dirs regenerate when the snapshot schema changes
+- Current config/archive dependency finding:
+  - native linklib and genmodule custom commands must depend on real config metadata files:
+    - `config/make.cfg`
+    - `gen/config/target.cfg`
+    - `gen/config/build.cfg`
+    - `gen/config/compiler.cfg`
+  - without those file deps, refreshing the bootstrap snapshot leaves stale native archives and modules in place even though the build settings changed
+  - archive consumers must also depend on real produced `.a` files for true archive producers, not only on interface stamps
+  - the correct mixed model is:
+    - interface stamps for interface-generation ordering
+    - real archive file deps for real archive producers (`linklibs-*`, genmodule public linklibs, genmodule `_rel` linklibs)
 - Current clean-tree parity state after the no-op fix:
   - `utility.library` from `/tmp/aros-clean-build-reuse` matches the legacy reference in size (`29600`) and is back in the ordinary byte-diff class rather than a structural size regression
-  - `graphics.library` from `/tmp/aros-clean-build-reuse` still has a real clean-tree parity regression: `210952` bytes vs legacy `211088`
+  - `graphics.library` from `/tmp/aros-clean-build-reuse` still has a real clean-tree parity regression
+    - earlier clean-tree state: `210952` vs legacy `211088`
+    - after the bootstrap/compiler-config fix and archive dependency fix: `205688` vs legacy `211088`
+  - the `graphics.library` drift is now known to involve shared compiler/linklib output and startup ordering, not only graphics-specific sources
+    - `libstdc.static.a` is now rebuilding from the refreshed snapshot
+    - `strncpy.o` now matches legacy again
+    - `__vcformat.o` still differs (`0x0b99` native vs `0x0bcf` legacy in the clean tree)
+    - the rebuilt `graphics.library` now diverges from legacy already in the startup region (`Graphics_CloseLib` / `Graphics_InitLib` / early text layout), so the remaining parity issue is broader than the old `stdc.static` tail-only drift
   - `gadtools.library` still has no matching artifact in the current legacy reference tree, so there is still no parity compare for it
 - Current native include-staging finding:
   - the flat native include root must mirror the legacy SDK header surface, not just copy trees opportunistically
@@ -455,3 +484,22 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
 - Current cache/migration caveat:
   - existing `cmake-build-debug` trees may need an explicit `AROS_ROM_NATIVE_MODULES` cache update when a newly migrated ROM module is added
   - that cache-upgrade behavior should be cleaned up when `rom/CMakeLists.txt` gets its dedicated post-migration cleanup pass
+- Current `dos` / `expansion` parity finding:
+  - the remaining real drift in `dos.library` and `expansion.library` is not in generated `*_start.c`, `*_init.o`, or the public archives; those native artifacts match legacy shape closely enough
+  - the shared CMake-side mistakes were:
+    - treating `noautolib` from `*.conf` as "clear the final autolib link chain"
+    - treating `noresident` from `*.conf` as "inject `-nosysbase -Wl,--defsym -Wl,SysBase=0x4` and drop implicit `exec` linkage"
+  - both behaviors are wrong:
+    - legacy still links the normal archive chain for `noautolib` modules
+    - legacy does not derive `-nosysbase` / fake `SysBase` from `noresident`
+  - concrete legacy proof from the generated link maps:
+    - `dos_init.o` and `expansion_init.o` pull `libexec.a(exec_autoinit.o)` on `SysBase`
+    - `libexec.a(exec_autoinit.o)` then pulls `libautoinit.a(__showerror.o)` on `___showerror`
+  - if native CMake predefines `SysBase=0x4`, that whole extraction chain is bypassed and the final module loses `___showerror`
+  - the CMake registration layer now keeps the normal autolib chain for `noautolib` modules and no longer injects fake-`SysBase` link flags for `noresident`
+- Current verification caveat on clean-tree rebuilds:
+  - the clean verification tree under `/tmp/aros-clean-build-reuse` still spends a lot of time in long `cmake -P` custom commands on this host/filesystem, often showing `D`/`Ds` process states while rewriting many interface stamps after shared graph changes
+  - when this happens, prefer:
+    - serialized Ninja verification (`-j1`)
+    - or rerunning the final generated module `cmake -P ... build_genmodule_module.cmake` command directly for the specific module being checked
+  - avoid reading too much into the wall-clock time there; the important signal is the regenerated command line and final artifact parity, not the slow NFS-bound custom-command churn

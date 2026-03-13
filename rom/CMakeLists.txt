@@ -41,6 +41,48 @@ foreach(_aros_rom_module IN LISTS AROS_ROM_NATIVE_MODULES)
   endif()
 endforeach()
 
+set(_aros_rom_kernel_package_base_native_deps
+  aros-rom-aros-native
+  aros-rom-bootloader-native
+  aros-rom-dos-native
+  aros-rom-dosboot-native
+  aros-rom-debug-native
+  aros-rom-filesystem-native
+  aros-rom-fs-ram-native
+  aros-rom-fs-con-native
+  aros-rom-graphics-native
+  aros-rom-hidd-gfx-native
+  aros-rom-hidd-input-native
+  aros-rom-hidd-kbd-native
+  aros-rom-hidd-mouse-native
+  aros-rom-utility-native
+  aros-rom-intuition-native
+  aros-rom-keymap-native
+  aros-rom-lddemon-native
+  aros-rom-console-native
+  aros-rom-gameport-native
+  aros-rom-input-native
+  aros-rom-keyboard-native
+  aros-rom-hiddclass-native
+  aros-rom-oop-native
+  aros-rom-hyperlayers-native
+)
+set(_aros_rom_kernel_package_base_available_deps)
+foreach(_aros_rom_kernel_package_dep IN LISTS _aros_rom_kernel_package_base_native_deps)
+  if(TARGET "${_aros_rom_kernel_package_dep}")
+    list(APPEND _aros_rom_kernel_package_base_available_deps "${_aros_rom_kernel_package_dep}")
+  endif()
+endforeach()
+
+add_custom_target(
+  aros-rom-kernel-package-base-native
+  DEPENDS ${_aros_rom_kernel_package_base_available_deps}
+)
+set_target_properties(aros-rom-kernel-package-base-native PROPERTIES FOLDER "aros/rom")
+
+add_custom_target(kernel-package-base DEPENDS aros-rom-kernel-package-base-native)
+set_target_properties(kernel-package-base PROPERTIES FOLDER "aros/rom")
+
 set(_aros_rom_legacy_interface_modules_default "aros;dos;graphics;intuition;kernel")
 list(APPEND _aros_rom_legacy_interface_modules_default ${AROS_ROM_NATIVE_MODULES})
 list(REMOVE_DUPLICATES _aros_rom_legacy_interface_modules_default)

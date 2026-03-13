@@ -15,6 +15,170 @@ function(_aros_sanitize_property_key input_value out_var)
   set(${out_var} "${_sanitized}" PARENT_SCOPE)
 endfunction()
 
+function(_aros_make_dotted_identifier input_value out_var)
+  string(REPLACE "/" "." _dotted "${input_value}")
+  set(${out_var} "${_dotted}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_compute_target_folders module_path out_public_var out_internal_var)
+  set(${out_public_var} "aros/${module_path}" PARENT_SCOPE)
+  set(${out_internal_var} "aros/internal/${module_path}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_set_target_folder_if_exists target_name folder_name)
+  if(TARGET "${target_name}" AND NOT "${folder_name}" STREQUAL "")
+    set_target_properties("${target_name}" PROPERTIES FOLDER "${folder_name}")
+  endif()
+endfunction()
+
+function(_aros_resolve_public_alias_name property_prefix preferred_name owner_id fallback_name out_var)
+  set(_candidate "${preferred_name}")
+  _aros_sanitize_property_key("${_candidate}" _candidate_key)
+  get_property(_existing_owner GLOBAL PROPERTY "${property_prefix}_${_candidate_key}")
+  if(TARGET "${_candidate}" AND NOT _existing_owner STREQUAL "${owner_id}")
+    set(_candidate "${fallback_name}")
+    _aros_sanitize_property_key("${_candidate}" _candidate_key)
+    get_property(_existing_owner GLOBAL PROPERTY "${property_prefix}_${_candidate_key}")
+  endif()
+
+  if(TARGET "${_candidate}" AND NOT _existing_owner STREQUAL "${owner_id}")
+    message(FATAL_ERROR "Public alias target collision for ${owner_id}: ${_candidate}")
+  endif()
+
+  set(${out_var} "${_candidate}" PARENT_SCOPE)
+endfunction()
+
+function(
+  _aros_register_public_module_aliases
+  module_path
+  module_name
+  module_type
+  owner_target
+  interfaces_build_target
+  interface_target
+  output_path
+  public_linklib_output
+)
+  _aros_compute_target_folders("${module_path}" _public_folder _internal_folder)
+  _aros_make_dotted_identifier("${module_path}" _module_dotted_path)
+
+  _aros_resolve_public_alias_name(
+    "AROS_PUBLIC_MODULE_INTERFACE_ALIAS_OWNER"
+    "${module_name}"
+    "${module_path}"
+    "${_module_dotted_path}"
+    _public_interface_target
+  )
+  if(NOT TARGET "${_public_interface_target}")
+    add_library("${_public_interface_target}" INTERFACE)
+  endif()
+  target_link_libraries("${_public_interface_target}" INTERFACE "${interface_target}")
+  add_dependencies("${_public_interface_target}" "${interfaces_build_target}")
+  _aros_set_target_folder_if_exists("${_public_interface_target}" "${_public_folder}")
+
+  get_target_property(_public_interface_include_dirs "${interface_target}" AROS_MODULE_INTERFACE_INCLUDE_DIRS)
+  if(_public_interface_include_dirs AND NOT _public_interface_include_dirs STREQUAL "AROS_MODULE_INTERFACE_INCLUDE_DIRS-NOTFOUND")
+    set_target_properties(
+      "${_public_interface_target}"
+      PROPERTIES
+        AROS_MODULE_INTERFACE_INCLUDE_DIRS "${_public_interface_include_dirs}"
+    )
+  endif()
+  get_target_property(_public_interface_stamp "${interface_target}" AROS_MODULE_INTERFACE_STAMP)
+  if(_public_interface_stamp AND NOT _public_interface_stamp STREQUAL "AROS_MODULE_INTERFACE_STAMP-NOTFOUND")
+    set_target_properties(
+      "${_public_interface_target}"
+      PROPERTIES
+        AROS_MODULE_INTERFACE_STAMP "${_public_interface_stamp}"
+    )
+  endif()
+  if(public_linklib_output AND NOT "${public_linklib_output}" STREQUAL "")
+    set_target_properties(
+      "${_public_interface_target}"
+      PROPERTIES
+        AROS_LINKLIB_OUTPUT "${public_linklib_output}"
+        AROS_LINKLIB_OWNER_TARGET "${owner_target}"
+    )
+    add_dependencies("${_public_interface_target}" "${owner_target}")
+  endif()
+
+  _aros_sanitize_property_key("${_public_interface_target}" _public_interface_key)
+  set_property(GLOBAL PROPERTY "AROS_PUBLIC_MODULE_INTERFACE_ALIAS_OWNER_${_public_interface_key}" "${module_path}")
+  _aros_sanitize_property_key("${module_path}" _module_path_key)
+  set_property(GLOBAL PROPERTY "AROS_PUBLIC_MODULE_INTERFACE_TARGET_${_module_path_key}" "${_public_interface_target}")
+
+  set(_preferred_artifact_target "${module_name}.${module_type}")
+  set(_fallback_artifact_target "${_module_dotted_path}.${module_type}")
+  _aros_resolve_public_alias_name(
+    "AROS_PUBLIC_MODULE_ARTIFACT_ALIAS_OWNER"
+    "${_preferred_artifact_target}"
+    "${module_path}"
+    "${_fallback_artifact_target}"
+    _public_artifact_target
+  )
+  if(NOT TARGET "${_public_artifact_target}")
+    add_custom_target("${_public_artifact_target}")
+  endif()
+  add_dependencies("${_public_artifact_target}" "${owner_target}")
+  set_target_properties(
+    "${_public_artifact_target}"
+    PROPERTIES
+      AROS_MODULE_OUTPUT "${output_path}"
+  )
+  _aros_set_target_folder_if_exists("${_public_artifact_target}" "${_public_folder}")
+
+  _aros_sanitize_property_key("${_public_artifact_target}" _public_artifact_key)
+  set_property(GLOBAL PROPERTY "AROS_PUBLIC_MODULE_ARTIFACT_ALIAS_OWNER_${_public_artifact_key}" "${module_path}")
+  set_property(GLOBAL PROPERTY "AROS_PUBLIC_MODULE_ARTIFACT_TARGET_${_module_path_key}" "${_public_artifact_target}")
+endfunction()
+
+function(_aros_register_public_linklib_alias module_path libname owner_target output_path)
+  _aros_compute_target_folders("${module_path}" _public_folder _internal_folder)
+  _aros_make_dotted_identifier("${module_path}" _module_dotted_path)
+  _aros_sanitize_property_key("${module_path}" _module_path_key)
+  get_property(_public_interface_target GLOBAL PROPERTY "AROS_PUBLIC_MODULE_INTERFACE_TARGET_${_module_path_key}")
+  if(_public_interface_target AND TARGET "${_public_interface_target}")
+    set(_public_linklib_target "${_public_interface_target}")
+  else()
+    _aros_resolve_public_alias_name(
+      "AROS_PUBLIC_LINKLIB_ALIAS_OWNER"
+      "${libname}"
+      "${module_path}"
+      "${_module_dotted_path}"
+      _public_linklib_target
+    )
+
+    if(NOT TARGET "${_public_linklib_target}")
+      add_custom_target("${_public_linklib_target}")
+    endif()
+  endif()
+
+  add_dependencies("${_public_linklib_target}" "${owner_target}")
+  set_target_properties(
+    "${_public_linklib_target}"
+    PROPERTIES
+      AROS_LINKLIB_OUTPUT "${output_path}"
+      AROS_LINKLIB_OWNER_TARGET "${owner_target}"
+  )
+  _aros_set_target_folder_if_exists("${_public_linklib_target}" "${_public_folder}")
+
+  _aros_sanitize_property_key("${_public_linklib_target}" _public_linklib_key)
+  set_property(GLOBAL PROPERTY "AROS_PUBLIC_LINKLIB_ALIAS_OWNER_${_public_linklib_key}" "${module_path}")
+  set_property(GLOBAL PROPERTY "AROS_PUBLIC_LINKLIB_TARGET_${_module_path_key}" "${_public_linklib_target}")
+endfunction()
+
+function(_aros_get_linklib_output_dir_for_sdk sdk_name out_var)
+  if("${sdk_name}" STREQUAL "" OR "${sdk_name}" STREQUAL "public")
+    set(_output_dir "${AROS_NATIVE_PUBLIC_LIB_DIR}")
+  elseif("${sdk_name}" STREQUAL "private")
+    set(_output_dir "${AROS_NATIVE_PRIVATE_LIB_DIR}")
+  else()
+    set(_output_dir "${AROS_NATIVE_BUILD_SDKS_DIR}/${sdk_name}/lib")
+  endif()
+
+  set(${out_var} "${_output_dir}" PARENT_SCOPE)
+endfunction()
+
 function(_aros_unwrap_strip_expression input_value out_var)
   set(_value "${input_value}")
   if(_value MATCHES "^\\$\\(strip[ \t]*(.*)\\)$")
@@ -677,11 +841,27 @@ function(_aros_collect_make_variable_from_file file_path variable_name out_var)
       continue()
     endif()
 
-    if(_line MATCHES "^${variable_name}[ \t]*(\\+=|:?=)[ \t]*(.*)$")
-      set(_assign_mode "${CMAKE_MATCH_1}")
-      set(_value "${CMAKE_MATCH_2}")
+    if(_line MATCHES "^([A-Za-z0-9_]+)[ \t]*(\\+=|:?=)[ \t]*(.*)$")
+      set(_assign_name "${CMAKE_MATCH_1}")
+      set(_assign_mode "${CMAKE_MATCH_2}")
+      set(_value "${CMAKE_MATCH_3}")
       _aros_expand_make_tokens("${_value}" _expanded_value)
       _aros_tokenize_mmake_value("${_expanded_value}" _expanded_tokens)
+
+      if(_assign_mode STREQUAL "+=" AND DEFINED _AROS_MMAKE_VAR_${_assign_name})
+        set(_AROS_MMAKE_VAR_${_assign_name} "${_AROS_MMAKE_VAR_${_assign_name}} ${_expanded_value}")
+      elseif(_assign_mode STREQUAL "?=")
+        if(NOT DEFINED _AROS_MMAKE_VAR_${_assign_name} OR "${_AROS_MMAKE_VAR_${_assign_name}}" STREQUAL "")
+          set(_AROS_MMAKE_VAR_${_assign_name} "${_expanded_value}")
+        endif()
+      else()
+        set(_AROS_MMAKE_VAR_${_assign_name} "${_expanded_value}")
+      endif()
+
+      if(NOT _assign_name STREQUAL "${variable_name}")
+        continue()
+      endif()
+
       if(_assign_mode STREQUAL "+=")
         list(APPEND _values ${_expanded_tokens})
       else()
@@ -784,9 +964,9 @@ function(_aros_collect_registered_archive_dependencies out_files_var out_targets
         get_target_property(
           _registered_output
           "${_registered_target}"
-          AROS_MODULE_INTERFACE_STAMP
+          AROS_MODULE_REL_LINKLIB_OUTPUT
         )
-        if(_registered_output STREQUAL "AROS_MODULE_INTERFACE_STAMP-NOTFOUND")
+        if(_registered_output STREQUAL "AROS_MODULE_REL_LINKLIB_OUTPUT-NOTFOUND")
           set(_registered_output "")
         endif()
       endif()
@@ -802,9 +982,9 @@ function(_aros_collect_registered_archive_dependencies out_files_var out_targets
         get_target_property(
           _registered_output
           "${_registered_target}"
-          AROS_MODULE_INTERFACE_STAMP
+          AROS_MODULE_PUBLIC_LINKLIB_OUTPUT
         )
-        if(_registered_output STREQUAL "AROS_MODULE_INTERFACE_STAMP-NOTFOUND")
+        if(_registered_output STREQUAL "AROS_MODULE_PUBLIC_LINKLIB_OUTPUT-NOTFOUND")
           set(_registered_output "")
         endif()
       endif()
@@ -977,6 +1157,200 @@ function(_aros_collect_include_interface_modules_from_files out_var)
 
   list(REMOVE_DUPLICATES _collected_modules)
   set(${out_var} "${_collected_modules}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_collect_include_virtual_paths_from_files out_var)
+  set(_source_scan_extensions
+    .c
+    .cc
+    .cpp
+    .cxx
+    .h
+    .hpp
+    .s
+    .S
+  )
+  set(_collected_include_paths)
+
+  foreach(_input_path IN LISTS ARGN)
+    if(NOT EXISTS "${_input_path}" OR IS_DIRECTORY "${_input_path}")
+      continue()
+    endif()
+
+    get_filename_component(_input_ext "${_input_path}" EXT)
+    list(FIND _source_scan_extensions "${_input_ext}" _ext_index)
+    if(_ext_index EQUAL -1)
+      continue()
+    endif()
+
+    file(STRINGS "${_input_path}" _include_lines
+      REGEX "^[ \t]*#[ \t]*include[ \t]*<[^>]+>"
+    )
+
+    foreach(_include_line IN LISTS _include_lines)
+      if(_include_line MATCHES "<([^>]+)>")
+        list(APPEND _collected_include_paths "${CMAKE_MATCH_1}")
+      endif()
+    endforeach()
+  endforeach()
+
+  list(REMOVE_DUPLICATES _collected_include_paths)
+  set(${out_var} "${_collected_include_paths}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_collect_staged_copy_include_paths_from_mmake mmakefile_path module_path out_var)
+  if(NOT EXISTS "${mmakefile_path}")
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  get_filename_component(_mmake_dir "${mmakefile_path}" DIRECTORY)
+  _aros_set_make_context_for_file("${mmakefile_path}" "${module_path}")
+  _aros_read_mmake_logical_lines("${mmakefile_path}" _logical_lines)
+
+  set(_condition_stack)
+  set(_staged_include_paths)
+  foreach(_line IN LISTS _logical_lines)
+    if(_line MATCHES "^#")
+      continue()
+    endif()
+
+    if(_line MATCHES "^ifn?eq[ \t]*\\(.*\\)$")
+      _aros_evaluate_mmake_condition("${_line}" _condition_value)
+      list(APPEND _condition_stack "${_condition_value}")
+      continue()
+    elseif(_line STREQUAL "else")
+      list(LENGTH _condition_stack _condition_len)
+      if(_condition_len GREATER 0)
+        math(EXPR _last_index "${_condition_len} - 1")
+        list(GET _condition_stack "${_last_index}" _last_value)
+        if(_last_value)
+          set(_new_value FALSE)
+        else()
+          set(_new_value TRUE)
+        endif()
+        list(REMOVE_AT _condition_stack "${_last_index}")
+        list(APPEND _condition_stack "${_new_value}")
+      endif()
+      continue()
+    elseif(_line STREQUAL "endif")
+      list(LENGTH _condition_stack _condition_len)
+      if(_condition_len GREATER 0)
+        math(EXPR _last_index "${_condition_len} - 1")
+        list(REMOVE_AT _condition_stack "${_last_index}")
+      endif()
+      continue()
+    endif()
+
+    _aros_condition_stack_is_active("${_condition_stack}" _condition_active)
+    if(NOT _condition_active)
+      continue()
+    endif()
+
+    if(_line MATCHES "^([A-Za-z0-9_]+)[ \t]*(\\+=|:=|\\?=|=)[ \t]*(.*)$")
+      set(_var_name "${CMAKE_MATCH_1}")
+      set(_assign_mode "${CMAKE_MATCH_2}")
+      set(_raw_value "${CMAKE_MATCH_3}")
+      _aros_expand_make_tokens("${_raw_value}" _expanded_value)
+      if(_assign_mode STREQUAL "+=" AND DEFINED _AROS_MMAKE_VAR_${_var_name})
+        set(_AROS_MMAKE_VAR_${_var_name} "${_AROS_MMAKE_VAR_${_var_name}} ${_expanded_value}")
+      elseif(_assign_mode STREQUAL "?=")
+        if(NOT DEFINED _AROS_MMAKE_VAR_${_var_name} OR "${_AROS_MMAKE_VAR_${_var_name}}" STREQUAL "")
+          set(_AROS_MMAKE_VAR_${_var_name} "${_expanded_value}")
+        endif()
+      else()
+        set(_AROS_MMAKE_VAR_${_var_name} "${_expanded_value}")
+      endif()
+      continue()
+    endif()
+
+    if(NOT _line MATCHES "^%copy_includes([ \t]+(.*))?$")
+      continue()
+    endif()
+
+    set(_copy_args_string "${CMAKE_MATCH_2}")
+    _aros_expand_make_tokens("${_copy_args_string}" _copy_args_string)
+    separate_arguments(_copy_args NATIVE_COMMAND "${_copy_args_string}")
+
+    set(_copy_dir ".")
+    set(_copy_path ".")
+    set(_copy_includes "")
+    foreach(_arg IN LISTS _copy_args)
+      if(_arg MATCHES "^dir=(.*)$")
+        set(_copy_dir "${CMAKE_MATCH_1}")
+      elseif(_arg MATCHES "^path=(.*)$")
+        set(_copy_path "${CMAKE_MATCH_1}")
+      elseif(_arg MATCHES "^includes=(.*)$")
+        set(_copy_includes "${CMAKE_MATCH_1}")
+      endif()
+    endforeach()
+
+    if(IS_ABSOLUTE "${_copy_dir}")
+      set(_source_root "${_copy_dir}")
+    else()
+      set(_source_root "${_mmake_dir}/${_copy_dir}")
+    endif()
+
+    if(_copy_path STREQUAL "." OR _copy_path STREQUAL "")
+      set(_virtual_root "")
+    else()
+      set(_virtual_root "${_copy_path}")
+    endif()
+
+    if(_copy_includes STREQUAL "" AND DEFINED _AROS_MMAKE_VAR_INCLUDE_FILES)
+      set(_copy_includes "${_AROS_MMAKE_VAR_INCLUDE_FILES}")
+    endif()
+
+    set(_resolved_copy_paths)
+    if(NOT _copy_includes STREQUAL "")
+      separate_arguments(_copy_include_entries NATIVE_COMMAND "${_copy_includes}")
+      foreach(_include_entry IN LISTS _copy_include_entries)
+        if(_include_entry STREQUAL "")
+          continue()
+        endif()
+
+        set(_include_source "")
+        if(IS_ABSOLUTE "${_include_entry}")
+          set(_include_source "${_include_entry}")
+        elseif(EXISTS "${_mmake_dir}/${_include_entry}")
+          set(_include_source "${_mmake_dir}/${_include_entry}")
+        elseif(EXISTS "${_source_root}/${_include_entry}")
+          set(_include_source "${_source_root}/${_include_entry}")
+        endif()
+
+        if(_include_source STREQUAL "" OR IS_DIRECTORY "${_include_source}")
+          continue()
+        endif()
+
+        file(RELATIVE_PATH _relative_include_path "${_source_root}" "${_include_source}")
+        if(_virtual_root STREQUAL "")
+          list(APPEND _resolved_copy_paths "${_relative_include_path}")
+        else()
+          list(APPEND _resolved_copy_paths "${_virtual_root}/${_relative_include_path}")
+        endif()
+      endforeach()
+    endif()
+
+    if(NOT _resolved_copy_paths)
+      file(GLOB_RECURSE _copy_header_candidates
+        RELATIVE "${_source_root}"
+        "${_source_root}/*.h"
+        "${_source_root}/*.hpp"
+      )
+      foreach(_relative_include_path IN LISTS _copy_header_candidates)
+        if(_virtual_root STREQUAL "")
+          list(APPEND _resolved_copy_paths "${_relative_include_path}")
+        else()
+          list(APPEND _resolved_copy_paths "${_virtual_root}/${_relative_include_path}")
+        endif()
+      endforeach()
+    endif()
+
+    list(APPEND _staged_include_paths ${_resolved_copy_paths})
+  endforeach()
+
+  list(REMOVE_DUPLICATES _staged_include_paths)
+  set(${out_var} "${_staged_include_paths}" PARENT_SCOPE)
 endfunction()
 
 function(_aros_extract_mmake_build_module_metadata mmakefile_src module_path out_prefix)
@@ -1577,6 +1951,8 @@ function(aros_register_genmodule_module target_name)
     LAYER_OVERRIDES
     LAYER_ADDITIONS
     LAYER_EXCLUSIONS
+    SOURCE_INCLUDE_PATHS
+    STAGED_INCLUDE_PATHS
     INCLUDE_DIRS
     COMPILE_DEFINITIONS
     COMPILE_OPTIONS
@@ -1662,6 +2038,7 @@ function(aros_register_genmodule_module target_name)
   set(_aros_module_interface_stamp "${_aros_module_work_dir}/.${AROS_MODULE_MODULE_NAME}.${AROS_MODULE_MODULE_TYPE}-interfaces.stamp")
   set(_aros_module_interface_target "${target_name}-interface")
   set(_aros_module_native_abi_target "${target_name}-abi")
+  _aros_compute_target_folders("${AROS_MODULE_MODULE_PATH}" _aros_module_public_folder _aros_module_internal_folder)
   string(REPLACE "-" ";" _aros_target_parts "${AROS_TARGET}")
   list(GET _aros_target_parts 0 _aros_target_arch)
   set(_aros_module_runtime_prefix "")
@@ -1762,6 +2139,22 @@ function(aros_register_genmodule_module target_name)
     set(${target_name}_INTERFACES_TARGET "${target_name}-interfaces" PARENT_SCOPE)
     set(${target_name}_INTERFACE_LIBRARY_TARGET "${_aros_module_interface_target}" PARENT_SCOPE)
     set(${target_name}_ABI_TARGET "${_aros_module_native_abi_target}" PARENT_SCOPE)
+    _aros_set_target_folder_if_exists("${target_name}-interfaces" "${_aros_module_internal_folder}")
+    _aros_set_target_folder_if_exists("${_aros_module_interface_target}" "${_aros_module_internal_folder}")
+    _aros_set_target_folder_if_exists("${target_name}" "${_aros_module_internal_folder}")
+    _aros_set_target_folder_if_exists("${_aros_module_native_abi_target}" "${_aros_module_internal_folder}")
+    if(NOT target_name MATCHES "-sdk-native$")
+      _aros_register_public_module_aliases(
+        "${AROS_MODULE_MODULE_PATH}"
+        "${AROS_MODULE_MODULE_NAME}"
+        "${AROS_MODULE_MODULE_TYPE}"
+        "${target_name}"
+        "${target_name}-interfaces"
+        "${_aros_module_interface_target}"
+        "${_aros_existing_output}"
+        "${_aros_module_public_linklib_output}"
+      )
+    endif()
     return()
   endif()
 
@@ -1784,6 +2177,12 @@ function(aros_register_genmodule_module target_name)
     endif()
   endforeach()
   set(_aros_module_sysroot "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/AROS/Development")
+  set(_aros_module_config_deps
+    "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/compiler.cfg"
+  )
 
   set(_aros_module_build_deps
     aros-configure
@@ -1815,9 +2214,6 @@ function(aros_register_genmodule_module target_name)
   _aros_read_config_tokens("TARGET_C_LIBS" _aros_module_target_c_libs)
   _aros_collect_link_library_names(_aros_module_target_c_lib_names ${_aros_module_target_c_libs})
   _aros_collect_link_library_names(_aros_module_option_link_lib_names ${AROS_MODULE_LINK_OPTIONS})
-  _aros_conf_has_option("${AROS_MODULE_MODULE_CONF}" "noautolib" _aros_module_has_noautolib)
-  _aros_conf_has_option("${AROS_MODULE_MODULE_CONF}" "noresident" _aros_module_has_noresident)
-
   _aros_encode_list("${AROS_MODULE_BASE_SOURCES}" _aros_module_base_sources)
   _aros_encode_list("${AROS_MODULE_LAYER_OVERRIDES}" _aros_module_layer_overrides)
   _aros_encode_list("${AROS_MODULE_LAYER_ADDITIONS}" _aros_module_layer_additions)
@@ -1830,25 +2226,11 @@ function(aros_register_genmodule_module target_name)
   if(AROS_COMPILER_NATIVE_MODULE_LINKLIBS)
     list(APPEND _aros_module_resolved_link_libs ${AROS_COMPILER_NATIVE_MODULE_LINKLIBS})
   endif()
-  if(_aros_module_has_noresident)
-    list(FIND AROS_MODULE_LINK_LIBS "exec" _aros_module_explicit_exec_index)
-    if(_aros_module_explicit_exec_index EQUAL -1)
-      list(REMOVE_ITEM _aros_module_resolved_link_libs exec)
-    endif()
-    list(APPEND _aros_module_resolved_link_options
-      "-nosysbase"
-      "-Wl,--defsym"
-      "-Wl,SysBase=0x4"
-    )
-  endif()
   list(REMOVE_DUPLICATES _aros_module_resolved_link_libs)
   _aros_encode_list("${_aros_module_resolved_link_libs}" _aros_module_link_libs)
   list(REMOVE_DUPLICATES _aros_module_resolved_link_options)
   _aros_encode_list("${_aros_module_resolved_link_options}" _aros_module_link_options)
   set(_aros_module_resolved_auto_link_libs ${AROS_COMPILER_NATIVE_MODULE_AUTOLIBS})
-  if(_aros_module_has_noautolib)
-    set(_aros_module_resolved_auto_link_libs)
-  endif()
   list(REMOVE_DUPLICATES _aros_module_resolved_auto_link_libs)
   _aros_encode_list("${_aros_module_resolved_auto_link_libs}" _aros_module_auto_link_libs)
 
@@ -1868,7 +2250,10 @@ function(aros_register_genmodule_module target_name)
     ${AROS_MODULE_INTERFACE_DEPENDS}
   )
 
-  set(_aros_module_interface_build_file_deps ${_aros_module_interface_dep_files})
+  set(_aros_module_interface_build_file_deps
+    ${_aros_module_interface_dep_files}
+    ${_aros_module_config_deps}
+  )
   set(_aros_module_interface_build_target_deps ${_aros_module_build_deps})
   list(APPEND _aros_module_interface_build_target_deps ${_aros_module_interface_dep_targets})
   list(REMOVE_DUPLICATES _aros_module_interface_build_target_deps)
@@ -1877,6 +2262,7 @@ function(aros_register_genmodule_module target_name)
     "${_aros_module_interface_stamp}"
     ${_aros_module_interface_dep_files}
     ${_aros_module_archive_dep_files}
+    ${_aros_module_config_deps}
   )
   set(_aros_module_runtime_build_target_deps ${_aros_module_runtime_build_deps})
   list(APPEND _aros_module_runtime_build_target_deps ${_aros_module_interface_dep_targets})
@@ -1957,10 +2343,13 @@ function(aros_register_genmodule_module target_name)
       AROS_MODULE_INTERFACE_DEPENDS "${AROS_MODULE_INTERFACE_DEPENDS}"
       AROS_MODULE_INTERFACE_INCLUDE_DIRS "${_aros_module_interface_include_dirs}"
       AROS_MODULE_INTERFACE_DEPENDENCY_STAMPS ""
+      AROS_SOURCE_INCLUDE_VIRTUAL_PATHS "${AROS_MODULE_SOURCE_INCLUDE_PATHS}"
+      AROS_MODULE_STAGED_INCLUDE_PATHS "${AROS_MODULE_STAGED_INCLUDE_PATHS}"
       AROS_MODULE_ARCHIVE_DEP_NAMES "${_aros_module_archive_dep_names}"
       AROS_MODULE_ARCHIVE_DEP_FILES "${_aros_module_archive_dep_files}"
       AROS_MODULE_ARCHIVE_DEP_TARGETS "${_aros_module_archive_dep_targets}"
       AROS_MODULE_PUBLIC_LINKLIB_OUTPUT "${_aros_module_public_linklib_output}"
+      AROS_MODULE_REL_LINKLIB_OUTPUT "${_aros_module_rel_linklib_output}"
   )
 
   get_property(_aros_registered_interface_targets GLOBAL PROPERTY AROS_REGISTERED_MODULE_INTERFACE_TARGETS)
@@ -2033,11 +2422,25 @@ function(aros_register_genmodule_module target_name)
 
   add_custom_target("${target_name}" DEPENDS "${_aros_module_output}")
   add_custom_target("${_aros_module_native_abi_target}" DEPENDS "${_aros_module_output}")
+  _aros_set_target_folder_if_exists("${target_name}-interfaces" "${_aros_module_internal_folder}")
+  _aros_set_target_folder_if_exists("${_aros_module_interface_target}" "${_aros_module_internal_folder}")
+  _aros_set_target_folder_if_exists("${target_name}" "${_aros_module_internal_folder}")
+  _aros_set_target_folder_if_exists("${_aros_module_native_abi_target}" "${_aros_module_internal_folder}")
   if(NOT target_name MATCHES "-sdk-native$")
     set_target_properties(
       "${target_name}"
       PROPERTIES
         AROS_MODULE_RUNTIME_LINK_DEP_NAMES "${_aros_module_resolved_link_libs}"
+    )
+    _aros_register_public_module_aliases(
+      "${AROS_MODULE_MODULE_PATH}"
+      "${AROS_MODULE_MODULE_NAME}"
+      "${AROS_MODULE_MODULE_TYPE}"
+      "${target_name}"
+      "${target_name}-interfaces"
+      "${_aros_module_interface_target}"
+      "${_aros_module_output}"
+      "${_aros_module_public_linklib_output}"
     )
   endif()
   set(${target_name}_OUTPUT "${_aros_module_output}" PARENT_SCOPE)
@@ -2158,6 +2561,12 @@ function(aros_register_mmake_genmodule_module target_name)
     "${CMAKE_SOURCE_DIR}/arch/*/${_aros_module_dir_name}/*"
   )
   list(FILTER _aros_module_source_deps EXCLUDE REGEX "/\\.git/")
+  _aros_collect_include_virtual_paths_from_files(_aros_module_source_include_paths ${_aros_module_source_deps})
+  _aros_collect_staged_copy_include_paths_from_mmake(
+    "${_aros_mmakefile_src}"
+    "${AROS_MMAKE_MODULE_PATH}"
+    _aros_module_staged_include_paths
+  )
 
   if(_aros_mmake_ARCHSPECIFIC)
     set(_aros_archspecific ARCHSPECIFIC)
@@ -2176,6 +2585,8 @@ function(aros_register_mmake_genmodule_module target_name)
     MODULE_SDK "${_aros_mmake_MODULE_SDK}"
     MMAKEFILE_SRC "${_aros_mmakefile_src}"
     MODULE_SUFFIX "${_aros_mmake_MODULE_SUFFIX}"
+    SOURCE_INCLUDE_PATHS ${_aros_module_source_include_paths}
+    STAGED_INCLUDE_PATHS ${_aros_module_staged_include_paths}
     LINK_LIBS ${_aros_mmake_MODULE_LINK_LIBS} ${_aros_mmake_CONF_RELLIBS}
     INTERFACE_NAMES ${_aros_mmake_INTERFACE_NAMES}
     INTERFACE_DEPENDS ${_aros_mmake_INTERFACE_DEPENDS}
@@ -2231,19 +2642,14 @@ function(aros_register_mmake_linklib target_name)
     )
   endif()
 
-  if(_aros_linklib_SDK STREQUAL "public" OR _aros_linklib_SDK STREQUAL "")
-    set(_aros_linklib_output_dir "${AROS_NATIVE_PUBLIC_LIB_DIR}")
-  elseif(_aros_linklib_SDK STREQUAL "private")
-    set(_aros_linklib_output_dir "${AROS_NATIVE_PRIVATE_LIB_DIR}")
-  else()
-    set(_aros_linklib_output_dir "${AROS_NATIVE_BUILD_SDKS_DIR}/${_aros_linklib_SDK}/lib")
-  endif()
+  _aros_get_linklib_output_dir_for_sdk("${_aros_linklib_SDK}" _aros_linklib_output_dir)
 
   set(_aros_linklib_output "${_aros_linklib_output_dir}/lib${_aros_linklib_LIBNAME}.a")
   string(REPLACE "/" "_" _aros_linklib_id "${AROS_LINKLIB_MODULE_PATH}")
   string(REPLACE "." "_" _aros_linklib_lib_id "${_aros_linklib_LIBNAME}")
   set(_aros_linklib_obj_dir "${CMAKE_BINARY_DIR}/linklibs/${_aros_linklib_id}/${_aros_linklib_lib_id}")
   set(_aros_linklib_include_stamp "${_aros_linklib_obj_dir}/.includes.stamp")
+  _aros_compute_target_folders("${AROS_LINKLIB_MODULE_PATH}" _aros_linklib_public_folder _aros_linklib_internal_folder)
   if(AROS_NATIVE_TOOLCHAIN_INSTALL_DIR)
     set(_aros_linklib_toolchain_dir "${AROS_NATIVE_TOOLCHAIN_INSTALL_DIR}")
   elseif(AROS_CROSSTOOLS_INSTALL_DIR)
@@ -2254,6 +2660,12 @@ function(aros_register_mmake_linklib target_name)
     set(_aros_linklib_toolchain_dir "${CMAKE_BINARY_DIR}/bin/${AROS_TARGET}/tools/crosstools")
   endif()
   set(_aros_linklib_sysroot "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/AROS/Development")
+  set(_aros_linklib_config_deps
+    "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/compiler.cfg"
+  )
 
   file(GLOB_RECURSE _aros_linklib_source_deps
     "${CMAKE_SOURCE_DIR}/${AROS_LINKLIB_MODULE_PATH}/*"
@@ -2268,6 +2680,7 @@ function(aros_register_mmake_linklib target_name)
     aros-native-includes
     "${CMAKE_SOURCE_DIR}/cmake/stage_mmake_includes.cmake"
     "${_aros_mmakefile_src}"
+    ${_aros_linklib_config_deps}
     ${AROS_LINKLIB_DEPENDS}
   )
   if(DEFINED AROS_NATIVE_INCLUDES_STAMP)
@@ -2321,6 +2734,7 @@ function(aros_register_mmake_linklib target_name)
       aros-native-includes
       "${CMAKE_SOURCE_DIR}/cmake/build_mmake_linklib.cmake"
       "${_aros_mmakefile_src}"
+      ${_aros_linklib_config_deps}
       ${_aros_linklib_source_deps}
       ${AROS_LINKLIB_DEPENDS}
     COMMENT "Building native CMake ${_aros_linklib_LIBNAME} linklib"
@@ -2329,6 +2743,8 @@ function(aros_register_mmake_linklib target_name)
 
   add_custom_target("${target_name}-includes" DEPENDS "${_aros_linklib_include_stamp}")
   add_custom_target("${target_name}" DEPENDS "${_aros_linklib_output}")
+  _aros_set_target_folder_if_exists("${target_name}-includes" "${_aros_linklib_internal_folder}")
+  _aros_set_target_folder_if_exists("${target_name}" "${_aros_linklib_internal_folder}")
   if(_aros_linklib_source_interface_modules)
     set_target_properties(
       "${target_name}"
@@ -2354,62 +2770,416 @@ function(aros_register_mmake_linklib target_name)
   if(TARGET aros-sdk-interfaces-native)
     add_dependencies("${target_name}" aros-sdk-interfaces-native)
   endif()
+  _aros_register_public_linklib_alias(
+    "${AROS_LINKLIB_MODULE_PATH}"
+    "${_aros_linklib_LIBNAME}"
+    "${target_name}"
+    "${_aros_linklib_output}"
+  )
   set(${target_name}_OUTPUT "${_aros_linklib_output}" PARENT_SCOPE)
+endfunction()
+
+function(aros_register_archive_linklib target_name)
+  set(_options)
+  set(_one_value_args
+    MODULE_PATH
+    LIBNAME
+    SDK
+  )
+  set(_multi_value_args
+    OBJECTS
+    DEPENDS
+    SOURCE_INTERFACE_MODULES
+  )
+  cmake_parse_arguments(AROS_ARCHIVE "${_options}" "${_one_value_args}" "${_multi_value_args}" ${ARGN})
+
+  if(NOT AROS_ARCHIVE_MODULE_PATH OR NOT AROS_ARCHIVE_LIBNAME OR NOT AROS_ARCHIVE_OBJECTS)
+    message(FATAL_ERROR "aros_register_archive_linklib requires MODULE_PATH, LIBNAME, and OBJECTS")
+  endif()
+
+  if(NOT AROS_ARCHIVE_SDK)
+    set(AROS_ARCHIVE_SDK "public")
+  endif()
+
+  _aros_get_linklib_output_dir_for_sdk("${AROS_ARCHIVE_SDK}" _aros_archive_output_dir)
+  set(_aros_archive_output "${_aros_archive_output_dir}/lib${AROS_ARCHIVE_LIBNAME}.a")
+  _aros_compute_target_folders("${AROS_ARCHIVE_MODULE_PATH}" _aros_archive_public_folder _aros_archive_internal_folder)
+
+  if(AROS_NATIVE_TOOLCHAIN_INSTALL_DIR)
+    set(_aros_archive_toolchain_dir "${AROS_NATIVE_TOOLCHAIN_INSTALL_DIR}")
+  elseif(AROS_CROSSTOOLS_INSTALL_DIR)
+    set(_aros_archive_toolchain_dir "${AROS_CROSSTOOLS_INSTALL_DIR}")
+  elseif(AROS_TOOLCHAIN_INSTALL_DIR)
+    set(_aros_archive_toolchain_dir "${AROS_TOOLCHAIN_INSTALL_DIR}")
+  else()
+    set(_aros_archive_toolchain_dir "${CMAKE_BINARY_DIR}/bin/${AROS_TARGET}/tools/crosstools")
+  endif()
+
+  set(_aros_archive_config_deps
+    "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/compiler.cfg"
+  )
+
+  _aros_encode_list("${AROS_ARCHIVE_OBJECTS}" _aros_archive_objects_encoded)
+
+  add_custom_command(
+    OUTPUT "${_aros_archive_output}"
+    COMMAND "${CMAKE_COMMAND}"
+            -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+            -DAROS_TARGET=${AROS_TARGET}
+            -DAROS_TOOLCHAIN_DIR=${_aros_archive_toolchain_dir}
+            -DAROS_TOOLCHAIN_PREFIX=${AROS_CROSSTOOLS_TARGET_CPU}-aros
+            -DARCHIVE_OUTPUT=${_aros_archive_output}
+            -DOBJECTS_ENCODED=${_aros_archive_objects_encoded}
+            -P "${CMAKE_SOURCE_DIR}/cmake/archive_static_library.cmake"
+    DEPENDS
+      "${CMAKE_SOURCE_DIR}/cmake/archive_static_library.cmake"
+      ${_aros_archive_config_deps}
+      ${AROS_ARCHIVE_OBJECTS}
+      ${AROS_ARCHIVE_DEPENDS}
+    COMMENT "Building native CMake ${AROS_ARCHIVE_LIBNAME} linklib"
+    VERBATIM
+  )
+
+  add_custom_target("${target_name}" DEPENDS "${_aros_archive_output}")
+  _aros_set_target_folder_if_exists("${target_name}" "${_aros_archive_internal_folder}")
+  if(AROS_ARCHIVE_SOURCE_INTERFACE_MODULES)
+    set_target_properties(
+      "${target_name}"
+      PROPERTIES
+        AROS_SOURCE_INTERFACE_MODULES "${AROS_ARCHIVE_SOURCE_INTERFACE_MODULES}"
+    )
+  endif()
+  get_property(_aros_registered_linklib_targets GLOBAL PROPERTY AROS_REGISTERED_LINKLIB_TARGETS)
+  list(APPEND _aros_registered_linklib_targets "${target_name}")
+  list(REMOVE_DUPLICATES _aros_registered_linklib_targets)
+  set_property(GLOBAL PROPERTY AROS_REGISTERED_LINKLIB_TARGETS "${_aros_registered_linklib_targets}")
+  _aros_sanitize_property_key("${AROS_ARCHIVE_LIBNAME}" _aros_archive_lib_key)
+  set_property(
+    GLOBAL
+    PROPERTY "AROS_REGISTERED_LINKLIB_OUTPUT_${_aros_archive_lib_key}"
+    "${_aros_archive_output}"
+  )
+  set_property(
+    GLOBAL
+    PROPERTY "AROS_REGISTERED_LINKLIB_TARGET_${_aros_archive_lib_key}"
+    "${target_name}"
+  )
+  _aros_register_public_linklib_alias(
+    "${AROS_ARCHIVE_MODULE_PATH}"
+    "${AROS_ARCHIVE_LIBNAME}"
+    "${target_name}"
+    "${_aros_archive_output}"
+  )
+  set(${target_name}_OUTPUT "${_aros_archive_output}" PARENT_SCOPE)
+endfunction()
+
+function(aros_register_mmake_hidd_stub_producer target_name)
+  set(_options)
+  set(_one_value_args
+    MODULE_PATH
+    MMAKEFILE_SRC
+    INCLUDES_MMAKEFILE_SRC
+    MMAKE_CONTEXT_DIR
+    SDK
+  )
+  set(_multi_value_args
+    DEPENDS
+  )
+  cmake_parse_arguments(AROS_HIDDSTUB "${_options}" "${_one_value_args}" "${_multi_value_args}" ${ARGN})
+
+  if(NOT AROS_HIDDSTUB_MODULE_PATH)
+    message(FATAL_ERROR "aros_register_mmake_hidd_stub_producer requires MODULE_PATH")
+  endif()
+
+  if(AROS_HIDDSTUB_MMAKEFILE_SRC)
+    set(_aros_hiddstub_mmakefile "${AROS_HIDDSTUB_MMAKEFILE_SRC}")
+  else()
+    set(_aros_hiddstub_mmakefile "${CMAKE_SOURCE_DIR}/${AROS_HIDDSTUB_MODULE_PATH}/mmakefile.src")
+  endif()
+
+  if(NOT EXISTS "${_aros_hiddstub_mmakefile}")
+    message(FATAL_ERROR "Missing hidd stub mmakefile: ${_aros_hiddstub_mmakefile}")
+  endif()
+
+  if(AROS_HIDDSTUB_INCLUDES_MMAKEFILE_SRC)
+    set(_aros_hiddstub_includes_mmakefile "${AROS_HIDDSTUB_INCLUDES_MMAKEFILE_SRC}")
+  else()
+    set(_aros_hiddstub_includes_mmakefile "${_aros_hiddstub_mmakefile}")
+  endif()
+
+  if(NOT AROS_HIDDSTUB_MMAKE_CONTEXT_DIR)
+    set(AROS_HIDDSTUB_MMAKE_CONTEXT_DIR "${AROS_HIDDSTUB_MODULE_PATH}")
+  endif()
+  if(NOT AROS_HIDDSTUB_SDK)
+    set(AROS_HIDDSTUB_SDK "private")
+  endif()
+
+  _aros_collect_make_variable_from_file(
+    "${_aros_hiddstub_mmakefile}"
+    "STUBS"
+    _aros_hiddstub_names
+    "${AROS_HIDDSTUB_MMAKE_CONTEXT_DIR}"
+  )
+  if(NOT _aros_hiddstub_names)
+    message(FATAL_ERROR "Could not determine STUBS from ${_aros_hiddstub_mmakefile}")
+  endif()
+
+  _aros_collect_make_variable_from_file(
+    "${_aros_hiddstub_mmakefile}"
+    "USER_CPPFLAGS"
+    _aros_hiddstub_user_cppflags
+    "${AROS_HIDDSTUB_MMAKE_CONTEXT_DIR}"
+  )
+  _aros_collect_make_variable_from_file(
+    "${_aros_hiddstub_mmakefile}"
+    "USER_CFLAGS"
+    _aros_hiddstub_user_cflags
+    "${AROS_HIDDSTUB_MMAKE_CONTEXT_DIR}"
+  )
+  _aros_collect_make_variable_from_file(
+    "${_aros_hiddstub_mmakefile}"
+    "USER_INCLUDES"
+    _aros_hiddstub_user_includes
+    "${AROS_HIDDSTUB_MMAKE_CONTEXT_DIR}"
+  )
+
+  _aros_read_config_tokens("CPPFLAGS" _aros_hiddstub_cppflags)
+  _aros_read_config_tokens("CFLAGS" _aros_hiddstub_cflags)
+
+  if(AROS_NATIVE_TOOLCHAIN_INSTALL_DIR)
+    set(_aros_hiddstub_toolchain_dir "${AROS_NATIVE_TOOLCHAIN_INSTALL_DIR}")
+  elseif(AROS_CROSSTOOLS_INSTALL_DIR)
+    set(_aros_hiddstub_toolchain_dir "${AROS_CROSSTOOLS_INSTALL_DIR}")
+  elseif(AROS_TOOLCHAIN_INSTALL_DIR)
+    set(_aros_hiddstub_toolchain_dir "${AROS_TOOLCHAIN_INSTALL_DIR}")
+  else()
+    set(_aros_hiddstub_toolchain_dir "${CMAKE_BINARY_DIR}/bin/${AROS_TARGET}/tools/crosstools")
+  endif()
+
+  string(REPLACE "/" "_" _aros_hiddstub_id "${AROS_HIDDSTUB_MODULE_PATH}")
+  set(_aros_hiddstub_work_dir "${CMAKE_BINARY_DIR}/hiddstubs/${_aros_hiddstub_id}")
+  set(_aros_hiddstub_include_stamp "${_aros_hiddstub_work_dir}/.includes.stamp")
+  get_filename_component(_aros_hiddstub_source_dir "${_aros_hiddstub_mmakefile}" DIRECTORY)
+  _aros_compute_target_folders("${AROS_HIDDSTUB_MODULE_PATH}" _aros_hiddstub_public_folder _aros_hiddstub_internal_folder)
+  set(_aros_hiddstub_config_deps
+    "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/compiler.cfg"
+  )
+
+  add_custom_command(
+    OUTPUT "${_aros_hiddstub_include_stamp}"
+    COMMAND "${CMAKE_COMMAND}"
+            -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
+            -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+            -DAROS_TARGET=${AROS_TARGET}
+            -DAROS_NATIVE_INCLUDE_DIR=${AROS_NATIVE_INCLUDE_DIR}
+            -DAROS_NATIVE_BUILD_SDKS_DIR=${AROS_NATIVE_BUILD_SDKS_DIR}
+            -DMMAKEFILE_PATH=${_aros_hiddstub_includes_mmakefile}
+            -DINCLUDES_SDK=${AROS_HIDDSTUB_SDK}
+            -DINCLUDES_STAMP=${_aros_hiddstub_include_stamp}
+            -P "${CMAKE_SOURCE_DIR}/cmake/stage_mmake_includes.cmake"
+    DEPENDS
+      aros-native-includes
+      "${CMAKE_SOURCE_DIR}/cmake/stage_mmake_includes.cmake"
+      "${_aros_hiddstub_includes_mmakefile}"
+      ${_aros_hiddstub_config_deps}
+      ${AROS_HIDDSTUB_DEPENDS}
+    COMMENT "Staging native CMake HIDD stub includes for ${AROS_HIDDSTUB_MODULE_PATH}"
+    VERBATIM
+  )
+
+  set(_aros_hiddstub_objects)
+  foreach(_aros_hiddstub_name IN LISTS _aros_hiddstub_names)
+    set(_aros_hiddstub_source "${_aros_hiddstub_source_dir}/${_aros_hiddstub_name}.c")
+    if(NOT EXISTS "${_aros_hiddstub_source}")
+      message(FATAL_ERROR "Missing HIDD stub source ${_aros_hiddstub_source}")
+    endif()
+
+    set(_aros_hiddstub_output "${AROS_NATIVE_PRIVATE_LIB_DIR}/hidd/${_aros_hiddstub_name}.o")
+    set(_aros_hiddstub_depfile "${_aros_hiddstub_work_dir}/${_aros_hiddstub_name}.d")
+    _aros_encode_list("${_aros_hiddstub_cppflags}" _aros_hiddstub_cppflags_encoded)
+    _aros_encode_list("${_aros_hiddstub_cflags}" _aros_hiddstub_cflags_encoded)
+    _aros_encode_list("${_aros_hiddstub_user_cppflags}" _aros_hiddstub_user_cppflags_encoded)
+    _aros_encode_list("${_aros_hiddstub_user_cflags}" _aros_hiddstub_user_cflags_encoded)
+    _aros_encode_list("${_aros_hiddstub_user_includes}" _aros_hiddstub_user_includes_encoded)
+
+    add_custom_command(
+      OUTPUT "${_aros_hiddstub_output}"
+      COMMAND "${CMAKE_COMMAND}"
+              -DAROS_TOOLCHAIN_DIR=${_aros_hiddstub_toolchain_dir}
+              -DAROS_TOOLCHAIN_PREFIX=${AROS_CROSSTOOLS_TARGET_CPU}-aros
+              -DAROS_SYSROOT=${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/AROS/Development
+              -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+              -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
+              -DAROS_NATIVE_INCLUDE_DIR=${AROS_NATIVE_INCLUDE_DIR}
+              -DAROS_NATIVE_BUILD_SDKS_DIR=${AROS_NATIVE_BUILD_SDKS_DIR}
+              -DOBJECT_SOURCE=${_aros_hiddstub_source}
+              -DOBJECT_OUTPUT=${_aros_hiddstub_output}
+              -DOBJECT_DEPFILE=${_aros_hiddstub_depfile}
+              -DCPPFLAGS_ENCODED=${_aros_hiddstub_cppflags_encoded}
+              -DCFLAGS_ENCODED=${_aros_hiddstub_cflags_encoded}
+              -DUSER_CPPFLAGS_ENCODED=${_aros_hiddstub_user_cppflags_encoded}
+              -DUSER_CFLAGS_ENCODED=${_aros_hiddstub_user_cflags_encoded}
+              -DUSER_INCLUDES_ENCODED=${_aros_hiddstub_user_includes_encoded}
+              -DSDK_NAME=${AROS_HIDDSTUB_SDK}
+              -P "${CMAKE_SOURCE_DIR}/cmake/compile_target_object.cmake"
+      DEPFILE "${_aros_hiddstub_depfile}"
+      DEPENDS
+        "${_aros_hiddstub_include_stamp}"
+        aros-sdk-interfaces-native
+        "${CMAKE_SOURCE_DIR}/cmake/compile_target_object.cmake"
+        "${_aros_hiddstub_source}"
+        "${_aros_hiddstub_mmakefile}"
+        ${_aros_hiddstub_config_deps}
+        ${AROS_HIDDSTUB_DEPENDS}
+      COMMENT "Building native CMake HIDD stub ${_aros_hiddstub_name}"
+      VERBATIM
+    )
+
+    list(APPEND _aros_hiddstub_objects "${_aros_hiddstub_output}")
+  endforeach()
+
+  add_custom_target("${target_name}" DEPENDS ${_aros_hiddstub_objects})
+  _aros_set_target_folder_if_exists("${target_name}" "${_aros_hiddstub_internal_folder}")
+
+  get_property(_aros_registered_hidd_stub_objects GLOBAL PROPERTY AROS_REGISTERED_HIDD_STUB_OBJECTS)
+  list(APPEND _aros_registered_hidd_stub_objects ${_aros_hiddstub_objects})
+  list(REMOVE_DUPLICATES _aros_registered_hidd_stub_objects)
+  set_property(GLOBAL PROPERTY AROS_REGISTERED_HIDD_STUB_OBJECTS "${_aros_registered_hidd_stub_objects}")
+
+  get_property(_aros_registered_hidd_stub_targets GLOBAL PROPERTY AROS_REGISTERED_HIDD_STUB_TARGETS)
+  list(APPEND _aros_registered_hidd_stub_targets "${target_name}")
+  list(REMOVE_DUPLICATES _aros_registered_hidd_stub_targets)
+  set_property(GLOBAL PROPERTY AROS_REGISTERED_HIDD_STUB_TARGETS "${_aros_registered_hidd_stub_targets}")
+endfunction()
+
+function(aros_finalize_registered_hidd_stub_linklib)
+  if(TARGET aros-compiler-hiddstubs-linklib-native)
+    return()
+  endif()
+
+  get_property(_aros_hidd_stub_objects GLOBAL PROPERTY AROS_REGISTERED_HIDD_STUB_OBJECTS)
+  get_property(_aros_hidd_stub_targets GLOBAL PROPERTY AROS_REGISTERED_HIDD_STUB_TARGETS)
+  if(NOT _aros_hidd_stub_objects)
+    return()
+  endif()
+
+  aros_register_archive_linklib(
+    aros-compiler-hiddstubs-linklib-native
+    MODULE_PATH compiler/libhiddstubs
+    LIBNAME hiddstubs
+    SDK private
+    OBJECTS ${_aros_hidd_stub_objects}
+    DEPENDS ${_aros_hidd_stub_targets}
+  )
 endfunction()
 
 function(aros_finalize_module_interfaces)
   get_property(_aros_registered_interface_targets GLOBAL PROPERTY AROS_REGISTERED_MODULE_INTERFACE_TARGETS)
+
+  foreach(_aros_interface_target IN LISTS _aros_registered_interface_targets)
+    if(NOT TARGET "${_aros_interface_target}")
+      continue()
+    endif()
+
+    get_target_property(_aros_staged_include_paths "${_aros_interface_target}" AROS_MODULE_STAGED_INCLUDE_PATHS)
+    if(NOT _aros_staged_include_paths OR _aros_staged_include_paths STREQUAL "AROS_MODULE_STAGED_INCLUDE_PATHS-NOTFOUND")
+      continue()
+    endif()
+
+    foreach(_aros_include_path IN LISTS _aros_staged_include_paths)
+      _aros_sanitize_property_key("${_aros_include_path}" _aros_include_key)
+      get_property(_aros_existing_target GLOBAL PROPERTY "AROS_STAGED_INCLUDE_TARGET_${_aros_include_key}")
+      if(_aros_existing_target AND NOT _aros_existing_target STREQUAL "${_aros_interface_target}")
+        message(FATAL_ERROR
+          "Staged include collision for ${_aros_include_path}: "
+          "${_aros_existing_target} vs ${_aros_interface_target}"
+        )
+      endif()
+      set_property(
+        GLOBAL
+        PROPERTY "AROS_STAGED_INCLUDE_TARGET_${_aros_include_key}"
+        "${_aros_interface_target}"
+      )
+    endforeach()
+  endforeach()
+
   foreach(_aros_interface_target IN LISTS _aros_registered_interface_targets)
     if(NOT TARGET "${_aros_interface_target}")
       continue()
     endif()
 
     get_target_property(_aros_interface_dep_nodes "${_aros_interface_target}" AROS_MODULE_INTERFACE_DEPENDS)
-    if(NOT _aros_interface_dep_nodes OR _aros_interface_dep_nodes STREQUAL "_aros_interface_dep_nodes-NOTFOUND")
-      continue()
-    endif()
-
-    set(_aros_interface_dep_targets)
+    set(_aros_declared_interface_dep_targets)
+    set(_aros_staged_interface_dep_targets)
     set(_aros_interface_dep_include_dirs)
     set(_aros_interface_dep_stamps)
-    foreach(_aros_dep_node IN LISTS _aros_interface_dep_nodes)
-      _aros_sanitize_property_key("${_aros_dep_node}" _aros_dep_key)
-      get_property(_aros_dep_target GLOBAL PROPERTY "AROS_MODULE_INTERFACE_TARGET_${_aros_dep_key}")
-      if(NOT _aros_dep_target OR _aros_dep_target STREQUAL "${_aros_interface_target}")
-        continue()
+    if(_aros_interface_dep_nodes AND NOT _aros_interface_dep_nodes STREQUAL "_aros_interface_dep_nodes-NOTFOUND")
+      foreach(_aros_dep_node IN LISTS _aros_interface_dep_nodes)
+        _aros_sanitize_property_key("${_aros_dep_node}" _aros_dep_key)
+        get_property(_aros_dep_target GLOBAL PROPERTY "AROS_MODULE_INTERFACE_TARGET_${_aros_dep_key}")
+        if(NOT _aros_dep_target OR _aros_dep_target STREQUAL "${_aros_interface_target}")
+          continue()
+        endif()
+        if(TARGET "${_aros_dep_target}")
+          list(APPEND _aros_declared_interface_dep_targets "${_aros_dep_target}")
+        endif()
+      endforeach()
+    endif()
+
+    get_target_property(_aros_source_include_paths "${_aros_interface_target}" AROS_SOURCE_INCLUDE_VIRTUAL_PATHS)
+    if(_aros_source_include_paths AND NOT _aros_source_include_paths STREQUAL "AROS_SOURCE_INCLUDE_VIRTUAL_PATHS-NOTFOUND")
+      foreach(_aros_source_include_path IN LISTS _aros_source_include_paths)
+        _aros_sanitize_property_key("${_aros_source_include_path}" _aros_source_include_key)
+        get_property(_aros_dep_target GLOBAL PROPERTY "AROS_STAGED_INCLUDE_TARGET_${_aros_source_include_key}")
+        if(_aros_dep_target AND NOT _aros_dep_target STREQUAL "${_aros_interface_target}" AND TARGET "${_aros_dep_target}")
+          list(APPEND _aros_staged_interface_dep_targets "${_aros_dep_target}")
+        endif()
+      endforeach()
+    endif()
+
+    set(_aros_interface_dep_targets
+      ${_aros_declared_interface_dep_targets}
+      ${_aros_staged_interface_dep_targets}
+    )
+    list(REMOVE_DUPLICATES _aros_declared_interface_dep_targets)
+    list(REMOVE_DUPLICATES _aros_staged_interface_dep_targets)
+    list(REMOVE_DUPLICATES _aros_interface_dep_targets)
+    foreach(_aros_dep_target IN LISTS _aros_interface_dep_targets)
+      get_target_property(
+        _aros_dep_include_dirs
+        "${_aros_dep_target}"
+        AROS_MODULE_INTERFACE_INCLUDE_DIRS
+      )
+      if(_aros_dep_include_dirs AND NOT _aros_dep_include_dirs STREQUAL "AROS_MODULE_INTERFACE_INCLUDE_DIRS-NOTFOUND")
+        list(APPEND _aros_interface_dep_include_dirs ${_aros_dep_include_dirs})
       endif()
-      if(TARGET "${_aros_dep_target}")
-        list(APPEND _aros_interface_dep_targets "${_aros_dep_target}")
-        get_target_property(
-          _aros_dep_include_dirs
-          "${_aros_dep_target}"
-          AROS_MODULE_INTERFACE_INCLUDE_DIRS
-        )
-        if(_aros_dep_include_dirs AND NOT _aros_dep_include_dirs STREQUAL "AROS_MODULE_INTERFACE_INCLUDE_DIRS-NOTFOUND")
-          list(APPEND _aros_interface_dep_include_dirs ${_aros_dep_include_dirs})
-        endif()
-        get_target_property(_aros_dep_stamp "${_aros_dep_target}" AROS_MODULE_INTERFACE_STAMP)
-        if(_aros_dep_stamp AND NOT _aros_dep_stamp STREQUAL "AROS_MODULE_INTERFACE_STAMP-NOTFOUND")
-          list(APPEND _aros_interface_dep_stamps "${_aros_dep_stamp}")
-        endif()
-        get_target_property(
-          _aros_dep_stamp_deps
-          "${_aros_dep_target}"
-          AROS_MODULE_INTERFACE_DEPENDENCY_STAMPS
-        )
-        if(_aros_dep_stamp_deps AND NOT _aros_dep_stamp_deps STREQUAL "AROS_MODULE_INTERFACE_DEPENDENCY_STAMPS-NOTFOUND")
-          list(APPEND _aros_interface_dep_stamps ${_aros_dep_stamp_deps})
-        endif()
+      get_target_property(_aros_dep_stamp "${_aros_dep_target}" AROS_MODULE_INTERFACE_STAMP)
+      if(_aros_dep_stamp AND NOT _aros_dep_stamp STREQUAL "AROS_MODULE_INTERFACE_STAMP-NOTFOUND")
+        list(APPEND _aros_interface_dep_stamps "${_aros_dep_stamp}")
+      endif()
+      get_target_property(
+        _aros_dep_stamp_deps
+        "${_aros_dep_target}"
+        AROS_MODULE_INTERFACE_DEPENDENCY_STAMPS
+      )
+      if(_aros_dep_stamp_deps AND NOT _aros_dep_stamp_deps STREQUAL "AROS_MODULE_INTERFACE_DEPENDENCY_STAMPS-NOTFOUND")
+        list(APPEND _aros_interface_dep_stamps ${_aros_dep_stamp_deps})
       endif()
     endforeach()
 
-    list(REMOVE_DUPLICATES _aros_interface_dep_targets)
     list(REMOVE_DUPLICATES _aros_interface_dep_include_dirs)
     _aros_filter_interface_include_dirs(_aros_interface_dep_include_dirs)
     list(REMOVE_DUPLICATES _aros_interface_dep_stamps)
-    if(_aros_interface_dep_targets)
-      target_link_libraries("${_aros_interface_target}" INTERFACE ${_aros_interface_dep_targets})
-      add_dependencies("${_aros_interface_target}" ${_aros_interface_dep_targets})
+    if(_aros_declared_interface_dep_targets)
+      target_link_libraries("${_aros_interface_target}" INTERFACE ${_aros_declared_interface_dep_targets})
+      add_dependencies("${_aros_interface_target}" ${_aros_declared_interface_dep_targets})
     endif()
     if(_aros_interface_dep_include_dirs)
       get_target_property(

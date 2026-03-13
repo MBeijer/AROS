@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(AROS LANGUAGES C CXX)
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+set_property(GLOBAL PROPERTY PREDEFINED_TARGETS_FOLDER "cmake")
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
   message(FATAL_ERROR "In-source builds are not supported. Use: cmake -S . -B <build-dir>")
@@ -233,6 +235,7 @@ if(NOT _aros_bootstrap_snapshot_toolchain_dir)
   set(_aros_bootstrap_snapshot_toolchain_dir "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/tools/crosstools")
 endif()
 string(JOIN "\n" _aros_bootstrap_snapshot_state
+  "AROS_BOOTSTRAP_SNAPSHOT_VERSION=3"
   "AROS_TARGET=${AROS_TARGET}"
   "AROS_LEGACY_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}"
   "AROS_EFFECTIVE_TOOLCHAIN_INSTALL_DIR=${_aros_bootstrap_snapshot_toolchain_dir}"
@@ -379,10 +382,26 @@ add_custom_target(aros-sdk-interfaces-native)
 add_subdirectory(compiler)
 add_subdirectory(arch)
 
+function(_aros_finalize_native_kernel_package_base_target)
+  if(TARGET aros-rom-kernel-package-base-native AND TARGET aros-workbench-libs-gadtools-native)
+    add_dependencies(aros-rom-kernel-package-base-native aros-workbench-libs-gadtools-native)
+  endif()
+  if(TARGET kernel-package-base AND TARGET aros-workbench-libs-gadtools-native)
+    add_dependencies(kernel-package-base aros-workbench-libs-gadtools-native)
+  endif()
+endfunction()
+
 # START LEGACY: temporary wrapper graph until full native CMake replacement.
 if(NOT AROS_ENABLE_LEGACY_PIPELINE)
   add_subdirectory(rom)
   add_subdirectory(workbench)
+  _aros_finalize_native_kernel_package_base_target()
+  if(COMMAND aros_finalize_registered_hidd_stub_linklib)
+    aros_finalize_registered_hidd_stub_linklib()
+  endif()
+  if(COMMAND aros_finalize_module_interfaces)
+    aros_finalize_module_interfaces()
+  endif()
   add_custom_target(aros-default ALL DEPENDS aros-crosstools-toolchain)
   return()
 endif()
@@ -430,7 +449,11 @@ aros_register_legacy_make_target(aros-ports ports ${_aros_legacy_crosstools_dep}
 
 add_subdirectory(rom)
 add_subdirectory(workbench)
+_aros_finalize_native_kernel_package_base_target()
 
+if(COMMAND aros_finalize_registered_hidd_stub_linklib)
+  aros_finalize_registered_hidd_stub_linklib()
+endif()
 if(COMMAND aros_finalize_module_interfaces)
   aros_finalize_module_interfaces()
 endif()

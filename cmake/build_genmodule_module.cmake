@@ -2203,7 +2203,7 @@ set(_module_generated_start_uses_libinit FALSE)
 foreach(_module_generated_start_source IN LISTS _module_generated_start_sources)
   file(STRINGS "${_module_generated_start_source}" _module_generated_start_autoinit_lines
     REGEX
-      "set_open_libraries\\(|set_call_funcs\\(|set_call_devfuncs\\(|__showerror\\b|THIS_PROGRAM_HANDLES_SYMBOLSET\\((INIT|EXIT|PROGRAM_ENTRIES|CTORS|DTORS|INIT_ARRAY|FINI_ARRAY)\\)|DECLARESET\\((INIT|EXIT|PROGRAM_ENTRIES|CTORS|DTORS|INIT_ARRAY|FINI_ARRAY)\\)|AROS_USERFUNC_(INIT|EXIT)"
+      "set_open_libraries\\(|set_call_funcs\\(|set_call_devfuncs\\(|__showerror\\b|THIS_PROGRAM_HANDLES_SYMBOLSET\\((LIBS|RELLIBS|INIT|EXIT|PROGRAM_ENTRIES|CTORS|DTORS|INIT_ARRAY|FINI_ARRAY)\\)|DECLARESET\\((LIBS|RELLIBS|INIT|EXIT|PROGRAM_ENTRIES|CTORS|DTORS|INIT_ARRAY|FINI_ARRAY)\\)|AROS_USERFUNC_(INIT|EXIT)"
   )
   if(_module_generated_start_autoinit_lines)
     set(_module_generated_start_uses_autoinit TRUE)
@@ -2240,11 +2240,14 @@ if(DEFINED AROS_BINARY_DIR AND NOT AROS_BINARY_DIR STREQUAL "")
   )
 endif()
 list(APPEND _common_compile_args ${_module_config_cppflags})
+list(APPEND _common_compile_args ${_module_mmake_user_cppflags})
+list(APPEND _common_compile_args ${_module_mmake_user_includes})
 list(APPEND _common_compile_args -D__AROS_GIMME_DEPRECATED__)
 list(APPEND _common_compile_args ${_module_target_isa_cflags})
 list(APPEND _common_compile_args ${_module_target_optimization_cflags})
 list(APPEND _common_compile_args ${_module_target_base_cflags})
 list(APPEND _common_compile_args ${_module_isa_cflags})
+list(APPEND _common_compile_args ${_module_mmake_user_cflags})
 _aros_get_active_layers(_module_compile_layers)
 get_filename_component(_module_dir_name "${MODULE_PATH}" NAME)
 foreach(_module_compile_layer IN LISTS _module_compile_layers)
@@ -2291,6 +2294,7 @@ list(APPEND _module_linklib_compile_args ${_module_generated_linklib_cflags})
 
 set(_common_asm_compile_args ${_common_compile_args})
 list(APPEND _common_asm_compile_args ${_module_config_aflags})
+list(APPEND _common_asm_compile_args ${_module_mmake_user_aflags})
 
 set(_hosted_layer_asm_compile_args ${_common_asm_compile_args})
 _aros_remove_token_entries(_hosted_layer_asm_compile_args "-I${AROS_NATIVE_INCLUDE_DIR}")
