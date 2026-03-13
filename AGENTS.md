@@ -461,14 +461,7 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - real archive file deps for real archive producers (`linklibs-*`, genmodule public linklibs, genmodule `_rel` linklibs)
 - Current clean-tree parity state after the no-op fix:
   - `utility.library` from `/tmp/aros-clean-build-reuse` matches the legacy reference in size (`29600`) and is back in the ordinary byte-diff class rather than a structural size regression
-  - `graphics.library` from `/tmp/aros-clean-build-reuse` still has a real clean-tree parity regression
-    - earlier clean-tree state: `210952` vs legacy `211088`
-    - after the bootstrap/compiler-config fix and archive dependency fix: `205688` vs legacy `211088`
-  - the `graphics.library` drift is now known to involve shared compiler/linklib output and startup ordering, not only graphics-specific sources
-    - `libstdc.static.a` is now rebuilding from the refreshed snapshot
-    - `strncpy.o` now matches legacy again
-    - `__vcformat.o` still differs (`0x0b99` native vs `0x0bcf` legacy in the clean tree)
-    - the rebuilt `graphics.library` now diverges from legacy already in the startup region (`Graphics_CloseLib` / `Graphics_InitLib` / early text layout), so the remaining parity issue is broader than the old `stdc.static` tail-only drift
+  - `graphics.library` from `/tmp/aros-clean-build-reuse` now matches the legacy reference in size (`211088`) and, after a fresh direct module rebuild, is down to a single byte diff in the normal `$VER:` date-drift class
   - `gadtools.library` still has no matching artifact in the current legacy reference tree, so there is still no parity compare for it
 - Current native include-staging finding:
   - the flat native include root must mirror the legacy SDK header surface, not just copy trees opportunistically
@@ -485,7 +478,7 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
   - existing `cmake-build-debug` trees may need an explicit `AROS_ROM_NATIVE_MODULES` cache update when a newly migrated ROM module is added
   - that cache-upgrade behavior should be cleaned up when `rom/CMakeLists.txt` gets its dedicated post-migration cleanup pass
 - Current `dos` / `expansion` parity finding:
-  - the remaining real drift in `dos.library` and `expansion.library` is not in generated `*_start.c`, `*_init.o`, or the public archives; those native artifacts match legacy shape closely enough
+  - the earlier remaining real drift in `dos.library` and `expansion.library` was not in generated `*_start.c`, `*_init.o`, or the public archives; those native artifacts match legacy shape closely enough
   - the shared CMake-side mistakes were:
     - treating `noautolib` from `*.conf` as "clear the final autolib link chain"
     - treating `noresident` from `*.conf` as "inject `-nosysbase -Wl,--defsym -Wl,SysBase=0x4` and drop implicit `exec` linkage"
@@ -497,6 +490,17 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - `libexec.a(exec_autoinit.o)` then pulls `libautoinit.a(__showerror.o)` on `___showerror`
   - if native CMake predefines `SysBase=0x4`, that whole extraction chain is bypassed and the final module loses `___showerror`
   - the CMake registration layer now keeps the normal autolib chain for `noautolib` modules and no longer injects fake-`SysBase` link flags for `noresident`
+  - current clean-tree status after direct module rebuilds:
+    - `expansion.library` is down to a single byte diff, matching the ordinary `$VER:` date-drift class
+    - `dos.library` now matches legacy in size (`176488`) but still has `383` byte diffs
+  - the remaining `dos.library` drift is now localized:
+    - diff blocks start in `generate_banner()` from `rom/dos/banner.c`, not in startup/link ordering
+    - `banner.c` embeds `REPOTYPE`, `REPOREVISION`, `REPOID`, and `ISODATE`
+    - the compared artifacts were built from different source-control identities, so the native clean tree and the current legacy reference embed different git hash / repo-id strings before the `$VER:` date
+    - concrete object-level evidence from `banner.o`:
+      - native `.rodata.cst16` includes `Version Git a628c85211 (git@github.com:MBaijer/AROS.git)`
+      - legacy `.rodata.cst16` includes `Version Git fd5684ac62 (https://github.com/deadwood2/AROS)`
+    - that means the remaining `dos.library` diff is not currently a proven CMake-vs-legacy build-graph mismatch; the reference inputs themselves are divergent
 - Current verification caveat on clean-tree rebuilds:
   - the clean verification tree under `/tmp/aros-clean-build-reuse` still spends a lot of time in long `cmake -P` custom commands on this host/filesystem, often showing `D`/`Ds` process states while rewriting many interface stamps after shared graph changes
   - when this happens, prefer:
@@ -526,5 +530,17 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - native: `/tmp/aros-clean-build-reuse/bin/linux-x86_64/AROS/boot/linux/Devs/hostlib.resource`
     - legacy: `/tmp/aros-legacy-reference-linux-x86_64/bin/linux-x86_64/AROS/boot/linux/Devs/hostlib.resource`
     - sizes match exactly: `14688`
-    - `cmp -l | wc -l` reports `1443` byte diffs
-    - the `$VER:` string is at the same offset (`4448`) and differs by date (`13.3.2026` vs `10.3.2026`), but the remaining diff count means this one is not yet proven to be date-only drift
+    - after the shared source-order fix and a direct module rebuild, `cmp -l | wc -l` is down to `1`
+    - the only remaining visible drift is the `$VER:` date byte at offset `4491`
+    - `$VER:` stays at the same string offset (`4448`):
+      - native: `$VER: hostlib.resource linux-x86_64 4.0 (13.3.2026)`
+      - legacy: `$VER: hostlib.resource linux-x86_64 4.0 (10.3.2026)`
+  - another shared cause of the remaining structural drift was source ordering:
+    - `_aros_resolve_module_sources()` must preserve mmake source order for modules whose own `MODULE_PATH` lives under `arch/...`
+    - only resolved sources from a different `arch/<layer>/...` directory should be treated as layer sources and fed into the sorted layer-override path
+    - base module sources under `arch/...` must stay in `_resolved_base_sources` so the final link order matches legacy
+- Current native asm compilation finding:
+  - module asm sources in `cmake/build_genmodule_module.cmake` must be compiled with `-x assembler-with-cpp`, matching legacy `assemble_q` behavior and the existing native `cmake/build_mmake_linklib.cmake` path
+  - without that, lowercase preprocessed asm like `arch/x86_64-all/exec/execstubs.s` fails with raw assembler parse errors on backslash-continued macro bodies and `#include`
+  - genmodule-produced `LINKLIBAFILES` / `RELLINKLIBAFILES` also need the same `-x assembler-with-cpp` treatment
+  - after that shared fix, `exec.library` builds again in the active Ninja tree

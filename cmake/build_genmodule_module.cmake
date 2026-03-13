@@ -1520,7 +1520,16 @@ function(_aros_resolve_module_sources out_var)
         endif()
       endforeach()
     endif()
-    if(_resolved MATCHES "/arch/")
+    set(_resolved_is_layer FALSE)
+    string(FIND "${_resolved}" "${AROS_SOURCE_DIR}/arch/" _resolved_arch_index)
+    if(_resolved_arch_index EQUAL 0)
+      set(_resolved_is_layer TRUE)
+      string(FIND "${_resolved}" "${AROS_SOURCE_DIR}/${MODULE_PATH}/" _resolved_module_root_index)
+      if(_resolved_module_root_index EQUAL 0)
+        set(_resolved_is_layer FALSE)
+      endif()
+    endif()
+    if(_resolved_is_layer)
       _aros_append_ordered_source_spec(_resolved_arch_source_specs "${_resolved}")
     else()
       list(APPEND _resolved_base_sources "${_resolved}")
@@ -2364,6 +2373,18 @@ if(DEFINED INTERFACE_ONLY AND INTERFACE_ONLY)
     endif()
     list(APPEND _module_public_linklib_objects "${_generated_linklib_object}")
   endforeach()
+  foreach(_generated_linklib_asm_source IN LISTS _module_generated_linklib_afiles)
+    set(_generated_linklib_asm_path "${MODULE_GENERATED_DIR}/linklib/${_generated_linklib_asm_source}.S")
+    set(_generated_linklib_asm_object "${MODULE_OBJ_DIR}/linklib/${_generated_linklib_asm_source}.o")
+    execute_process(
+      COMMAND "${_module_cc}" -x assembler-with-cpp ${_module_linklib_compile_args} -c "${_generated_linklib_asm_path}" -o "${_generated_linklib_asm_object}"
+      RESULT_VARIABLE _compile_result
+    )
+    if(NOT _compile_result EQUAL 0)
+      message(FATAL_ERROR "Failed compiling ${_generated_linklib_asm_path}")
+    endif()
+    list(APPEND _module_public_linklib_objects "${_generated_linklib_asm_object}")
+  endforeach()
   _aros_remove_empty_entries(_module_public_linklib_objects)
 
   set(_module_public_linklib "${AROS_NATIVE_PUBLIC_LIB_DIR}/lib${MODULE_NAME}${_module_linklib_suffix}.a")
@@ -2397,6 +2418,18 @@ if(DEFINED INTERFACE_ONLY AND INTERFACE_ONLY)
       message(FATAL_ERROR "Failed compiling ${_generated_rellinklib_path}")
     endif()
     list(APPEND _module_rel_linklib_objects "${_generated_rellinklib_object}")
+  endforeach()
+  foreach(_generated_rellinklib_asm_source IN LISTS _module_generated_rellinklib_afiles)
+    set(_generated_rellinklib_asm_path "${MODULE_GENERATED_DIR}/linklib/${_generated_rellinklib_asm_source}.S")
+    set(_generated_rellinklib_asm_object "${MODULE_OBJ_DIR}/linklib/${_generated_rellinklib_asm_source}.o")
+    execute_process(
+      COMMAND "${_module_cc}" -x assembler-with-cpp ${_module_linklib_compile_args} -c "${_generated_rellinklib_asm_path}" -o "${_generated_rellinklib_asm_object}"
+      RESULT_VARIABLE _compile_result
+    )
+    if(NOT _compile_result EQUAL 0)
+      message(FATAL_ERROR "Failed compiling ${_generated_rellinklib_asm_path}")
+    endif()
+    list(APPEND _module_rel_linklib_objects "${_generated_rellinklib_asm_object}")
   endforeach()
   _aros_remove_empty_entries(_module_rel_linklib_objects)
 
@@ -2515,10 +2548,17 @@ foreach(_source IN LISTS _module_sources)
   if(DEFINED AROS_GENMODULE_DEBUG AND AROS_GENMODULE_DEBUG)
     message(STATUS "Compile args for ${_source}: ${_source_compile_args}")
   endif()
-  execute_process(
-    COMMAND "${_module_cc}" ${_source_compile_args} -c "${_source}" -o "${_object}"
-    RESULT_VARIABLE _compile_result
-  )
+  if(_source_ext STREQUAL ".s" OR _source_ext STREQUAL ".S")
+    execute_process(
+      COMMAND "${_module_cc}" -x assembler-with-cpp ${_source_compile_args} -c "${_source}" -o "${_object}"
+      RESULT_VARIABLE _compile_result
+    )
+  else()
+    execute_process(
+      COMMAND "${_module_cc}" ${_source_compile_args} -c "${_source}" -o "${_object}"
+      RESULT_VARIABLE _compile_result
+    )
+  endif()
   if(NOT _compile_result EQUAL 0)
     message(FATAL_ERROR "Failed compiling ${_source}")
   endif()
