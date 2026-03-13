@@ -201,31 +201,98 @@ set(AROS_CONFIGURE_STAMP "${CMAKE_BINARY_DIR}/.cmake-aros-configured.stamp")
 set(AROS_CONFIGURE_TARGET_CFG "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg")
 set(AROS_CONFIGURE_MMAKE_CONFIG "${AROS_LEGACY_BUILD_DIR}/mmake.config")
 set(_aros_append_mmake_ignoredirs_script "${CMAKE_SOURCE_DIR}/cmake/append_mmake_ignoredirs.cmake")
+set(_aros_run_legacy_configure_script "${CMAKE_SOURCE_DIR}/cmake/run_legacy_configure.cmake")
+set(_aros_configure_required_outputs
+  "${AROS_LEGACY_BUILD_DIR}/Makefile"
+  "${AROS_LEGACY_BUILD_DIR}/config.status"
+  "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
+  "${AROS_CONFIGURE_MMAKE_CONFIG}"
+  "${AROS_CONFIGURE_TARGET_CFG}"
+  "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
+  "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/conf.cmake"
+  "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/make.defaults"
+)
+set(_aros_list_sep "__AROS_LIST_SEP__")
+string(REPLACE ";" "${_aros_list_sep}" _aros_configure_cli_args_encoded "${_aros_configure_cli_args}")
+string(REPLACE ";" "${_aros_list_sep}" _aros_configure_required_outputs_encoded "${_aros_configure_required_outputs}")
+set(_aros_configure_bootstrap_state_file "${CMAKE_BINARY_DIR}/.cmake-aros-configure-bootstrap-state.txt")
+string(JOIN "\n" _aros_configure_bootstrap_state
+  "AROS_TARGET=${AROS_TARGET}"
+  "AROS_LEGACY_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}"
+  "AROS_CONFIGURE_ARGS=${_aros_configure_cli_args_encoded}"
+)
+
+set(_aros_bootstrap_config_needed FALSE)
+foreach(_aros_required_output IN LISTS _aros_configure_required_outputs)
+  if(NOT EXISTS "${_aros_required_output}")
+    set(_aros_bootstrap_config_needed TRUE)
+    break()
+  endif()
+endforeach()
+
+if(NOT _aros_bootstrap_config_needed)
+  foreach(_aros_config_input IN ITEMS
+      "${CMAKE_SOURCE_DIR}/configure"
+      "${CMAKE_SOURCE_DIR}/configure.in"
+      "${CMAKE_SOURCE_DIR}/Makefile.in"
+      "${_aros_append_mmake_ignoredirs_script}"
+      "${_aros_run_legacy_configure_script}")
+    if("${_aros_config_input}" IS_NEWER_THAN "${AROS_CONFIGURE_TARGET_CFG}")
+      set(_aros_bootstrap_config_needed TRUE)
+      break()
+    endif()
+  endforeach()
+endif()
+
+if(NOT _aros_bootstrap_config_needed)
+  if(EXISTS "${_aros_configure_bootstrap_state_file}")
+    file(READ "${_aros_configure_bootstrap_state_file}" _aros_existing_configure_bootstrap_state)
+  else()
+    set(_aros_existing_configure_bootstrap_state "")
+  endif()
+  if(NOT _aros_existing_configure_bootstrap_state STREQUAL "${_aros_configure_bootstrap_state}\n")
+    set(_aros_bootstrap_config_needed TRUE)
+  endif()
+endif()
+
+if(_aros_bootstrap_config_needed)
+  message(STATUS "Bootstrapping legacy configure metadata in ${AROS_LEGACY_BUILD_DIR}")
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+            "-DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            "-DAROS_ACTIVE_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}"
+            "-DAROS_CONFIGURE_ARGS_ENCODED=${_aros_configure_cli_args_encoded}"
+            "-DAROS_REQUIRED_OUTPUTS_ENCODED=${_aros_configure_required_outputs_encoded}"
+            "-DAROS_LIST_SEP=${_aros_list_sep}"
+            -P "${_aros_run_legacy_configure_script}"
+    COMMAND_ECHO STDOUT
+    RESULT_VARIABLE _aros_bootstrap_config_result
+  )
+  if(NOT _aros_bootstrap_config_result EQUAL 0)
+    message(FATAL_ERROR "Failed bootstrapping legacy configure metadata in ${AROS_LEGACY_BUILD_DIR}")
+  endif()
+  file(WRITE "${_aros_configure_bootstrap_state_file}" "${_aros_configure_bootstrap_state}\n")
+endif()
 
 add_custom_command(
   OUTPUT "${AROS_CONFIGURE_STAMP}"
-  COMMAND "${CMAKE_COMMAND}" -E make_directory "${AROS_LEGACY_BUILD_DIR}"
-  COMMAND "${CMAKE_COMMAND}" -E chdir "${AROS_LEGACY_BUILD_DIR}"
-          "${CMAKE_SOURCE_DIR}/configure" ${_aros_configure_cli_args}
-  # START LEGACY: normalize mmake ignoredir list to avoid scanning stale CMake build trees.
   COMMAND "${CMAKE_COMMAND}"
-          -DMMAKE_CONFIG_PATH=${AROS_LEGACY_BUILD_DIR}/mmake.config
-          -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-          -DAROS_ACTIVE_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
-          -P "${_aros_append_mmake_ignoredirs_script}"
-  # END LEGACY
+          "-DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+          "-DAROS_ACTIVE_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}"
+          "-DAROS_CONFIGURE_ARGS_ENCODED=${_aros_configure_cli_args_encoded}"
+          "-DAROS_REQUIRED_OUTPUTS_ENCODED=${_aros_configure_required_outputs_encoded}"
+          "-DAROS_LIST_SEP=${_aros_list_sep}"
+          -P "${_aros_run_legacy_configure_script}"
   COMMAND "${CMAKE_COMMAND}" -E touch "${AROS_CONFIGURE_STAMP}"
   DEPENDS
     "${CMAKE_SOURCE_DIR}/configure"
     "${CMAKE_SOURCE_DIR}/configure.in"
     "${CMAKE_SOURCE_DIR}/Makefile.in"
     "${_aros_append_mmake_ignoredirs_script}"
+    "${_aros_run_legacy_configure_script}"
     "${_aros_configure_args_file}"
   BYPRODUCTS
-    "${AROS_LEGACY_BUILD_DIR}/Makefile"
-    "${AROS_LEGACY_BUILD_DIR}/config.status"
-    "${AROS_CONFIGURE_MMAKE_CONFIG}"
-    "${AROS_CONFIGURE_TARGET_CFG}"
+    ${_aros_configure_required_outputs}
   COMMENT "Configuring AROS in ${AROS_LEGACY_BUILD_DIR} (target: ${AROS_TARGET})"
   VERBATIM
 )

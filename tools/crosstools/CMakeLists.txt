@@ -117,11 +117,41 @@ if(AROS_CROSSTOOLS_NATIVE)
     set(${out_var} "${_args}" PARENT_SCOPE)
   endfunction()
 
+  function(_aros_crosstools_live_log_command out_var log_dir log_name)
+    set(_cmd /bin/bash "${CMAKE_SOURCE_DIR}/cmake/run_with_live_log.sh" "${log_dir}/${log_name}.log")
+    list(APPEND _cmd ${ARGN})
+    set(${out_var} "${_cmd}" PARENT_SCOPE)
+  endfunction()
+
   _aros_crosstools_external_source(
     _aros_gmp_source_args
     "${_aros_src_dir}/gmp-${AROS_GMP_VERSION}"
     URLS "https://ftp.gnu.org/gnu/gmp/gmp-${AROS_GMP_VERSION}.tar.xz"
     ARCHIVE_NAMES "gmp-${AROS_GMP_VERSION}.tar.xz" "gmp-${AROS_GMP_VERSION}.tar.bz2"
+  )
+  set(_aros_gmp_log_dir "${_aros_gnu_root}/logs/gmp")
+  _aros_crosstools_live_log_command(
+    _aros_gmp_configure_cmd
+    "${_aros_gmp_log_dir}"
+    configure
+    <SOURCE_DIR>/configure
+    --prefix=${AROS_CROSSTOOLS_INSTALL_DIR}
+    --disable-shared
+    --enable-static
+    --bindir=${AROS_CROSSTOOLS_INSTALL_DIR}/bin
+    --libdir=${AROS_CROSSTOOLS_INSTALL_DIR}/lib
+  )
+  _aros_crosstools_live_log_command(
+    _aros_gmp_build_cmd
+    "${_aros_gmp_log_dir}"
+    build
+    "${_aros_make_program_local}" -j1
+  )
+  _aros_crosstools_live_log_command(
+    _aros_gmp_install_cmd
+    "${_aros_gmp_log_dir}"
+    install
+    "${_aros_make_program_local}" -j1 install
   )
   ExternalProject_Add(crosstools_gmp
     ${_aros_gmp_source_args}
@@ -131,20 +161,15 @@ if(AROS_CROSSTOOLS_NATIVE)
       "${CMAKE_COMMAND}" -E env
       "CFLAGS=${AROS_CROSSTOOLS_HOST_CFLAGS}"
       "CXXFLAGS=${AROS_CROSSTOOLS_HOST_CXXFLAGS}"
-      <SOURCE_DIR>/configure
-      --prefix=${AROS_CROSSTOOLS_INSTALL_DIR}
-      --disable-shared
-      --enable-static
-      --bindir=${AROS_CROSSTOOLS_INSTALL_DIR}/bin
-      --libdir=${AROS_CROSSTOOLS_INSTALL_DIR}/lib
-    BUILD_COMMAND "${_aros_make_program_local}" -j1
-    INSTALL_COMMAND "${_aros_make_program_local}" -j1 install
+      ${_aros_gmp_configure_cmd}
+    BUILD_COMMAND ${_aros_gmp_build_cmd}
+    INSTALL_COMMAND ${_aros_gmp_install_cmd}
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     BUILD_IN_SOURCE OFF
     LOG_DOWNLOAD ON
-    LOG_CONFIGURE ON
-    LOG_BUILD ON
-    LOG_INSTALL ON
+    USES_TERMINAL_CONFIGURE ON
+    USES_TERMINAL_BUILD ON
+    USES_TERMINAL_INSTALL ON
   )
 
   _aros_crosstools_external_source(
@@ -155,6 +180,33 @@ if(AROS_CROSSTOOLS_NATIVE)
       "https://gcc.gnu.org/pub/gcc/infrastructure/isl-${AROS_ISL_VERSION}.tar.xz"
     ARCHIVE_NAMES "isl-${AROS_ISL_VERSION}.tar.xz"
   )
+  set(_aros_isl_log_dir "${_aros_gnu_root}/logs/isl")
+  _aros_crosstools_live_log_command(
+    _aros_isl_configure_cmd
+    "${_aros_isl_log_dir}"
+    configure
+    <SOURCE_DIR>/configure
+    --prefix=${AROS_CROSSTOOLS_INSTALL_DIR}
+    --disable-shared
+    --enable-static
+    --without-piplib
+    --bindir=${AROS_CROSSTOOLS_INSTALL_DIR}/bin
+    --libdir=${AROS_CROSSTOOLS_INSTALL_DIR}/lib
+    CPPFLAGS=-I${AROS_CROSSTOOLS_INSTALL_DIR}/include
+    LDFLAGS=-L${AROS_CROSSTOOLS_INSTALL_DIR}/lib
+  )
+  _aros_crosstools_live_log_command(
+    _aros_isl_build_cmd
+    "${_aros_isl_log_dir}"
+    build
+    "${_aros_make_program_local}" -j1
+  )
+  _aros_crosstools_live_log_command(
+    _aros_isl_install_cmd
+    "${_aros_isl_log_dir}"
+    install
+    "${_aros_make_program_local}" -j1 install
+  )
   ExternalProject_Add(crosstools_isl
     ${_aros_isl_source_args}
     PREFIX "${_aros_gnu_root}/isl"
@@ -163,24 +215,16 @@ if(AROS_CROSSTOOLS_NATIVE)
       "${CMAKE_COMMAND}" -E env
       "CFLAGS=${AROS_CROSSTOOLS_HOST_CFLAGS}"
       "CXXFLAGS=${AROS_CROSSTOOLS_HOST_CXXFLAGS}"
-      <SOURCE_DIR>/configure
-      --prefix=${AROS_CROSSTOOLS_INSTALL_DIR}
-      --disable-shared
-      --enable-static
-      --without-piplib
-      --bindir=${AROS_CROSSTOOLS_INSTALL_DIR}/bin
-      --libdir=${AROS_CROSSTOOLS_INSTALL_DIR}/lib
-      CPPFLAGS=-I${AROS_CROSSTOOLS_INSTALL_DIR}/include
-      LDFLAGS=-L${AROS_CROSSTOOLS_INSTALL_DIR}/lib
-    BUILD_COMMAND "${_aros_make_program_local}" -j1
-    INSTALL_COMMAND "${_aros_make_program_local}" -j1 install
+      ${_aros_isl_configure_cmd}
+    BUILD_COMMAND ${_aros_isl_build_cmd}
+    INSTALL_COMMAND ${_aros_isl_install_cmd}
     DEPENDS crosstools_gmp
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     BUILD_IN_SOURCE OFF
     LOG_DOWNLOAD ON
-    LOG_CONFIGURE ON
-    LOG_BUILD ON
-    LOG_INSTALL ON
+    USES_TERMINAL_CONFIGURE ON
+    USES_TERMINAL_BUILD ON
+    USES_TERMINAL_INSTALL ON
   )
 
   _aros_crosstools_external_source(
@@ -188,6 +232,32 @@ if(AROS_CROSSTOOLS_NATIVE)
     "${_aros_src_dir}/mpfr-${AROS_MPFR_VERSION}"
     URLS "https://ftp.gnu.org/gnu/mpfr/mpfr-${AROS_MPFR_VERSION}.tar.xz"
     ARCHIVE_NAMES "mpfr-${AROS_MPFR_VERSION}.tar.xz"
+  )
+  set(_aros_mpfr_log_dir "${_aros_gnu_root}/logs/mpfr")
+  _aros_crosstools_live_log_command(
+    _aros_mpfr_configure_cmd
+    "${_aros_mpfr_log_dir}"
+    configure
+    <SOURCE_DIR>/configure
+    --prefix=${AROS_CROSSTOOLS_INSTALL_DIR}
+    --disable-shared
+    --enable-static
+    --bindir=${AROS_CROSSTOOLS_INSTALL_DIR}/bin
+    --libdir=${AROS_CROSSTOOLS_INSTALL_DIR}/lib
+    CPPFLAGS=-I${AROS_CROSSTOOLS_INSTALL_DIR}/include
+    LDFLAGS=-L${AROS_CROSSTOOLS_INSTALL_DIR}/lib
+  )
+  _aros_crosstools_live_log_command(
+    _aros_mpfr_build_cmd
+    "${_aros_mpfr_log_dir}"
+    build
+    "${_aros_make_program_local}" -j1
+  )
+  _aros_crosstools_live_log_command(
+    _aros_mpfr_install_cmd
+    "${_aros_mpfr_log_dir}"
+    install
+    "${_aros_make_program_local}" -j1 install
   )
   ExternalProject_Add(crosstools_mpfr
     ${_aros_mpfr_source_args}
@@ -197,23 +267,16 @@ if(AROS_CROSSTOOLS_NATIVE)
       "${CMAKE_COMMAND}" -E env
       "CFLAGS=${AROS_CROSSTOOLS_HOST_CFLAGS}"
       "CXXFLAGS=${AROS_CROSSTOOLS_HOST_CXXFLAGS}"
-      <SOURCE_DIR>/configure
-      --prefix=${AROS_CROSSTOOLS_INSTALL_DIR}
-      --disable-shared
-      --enable-static
-      --bindir=${AROS_CROSSTOOLS_INSTALL_DIR}/bin
-      --libdir=${AROS_CROSSTOOLS_INSTALL_DIR}/lib
-      CPPFLAGS=-I${AROS_CROSSTOOLS_INSTALL_DIR}/include
-      LDFLAGS=-L${AROS_CROSSTOOLS_INSTALL_DIR}/lib
-    BUILD_COMMAND "${_aros_make_program_local}" -j1
-    INSTALL_COMMAND "${_aros_make_program_local}" -j1 install
+      ${_aros_mpfr_configure_cmd}
+    BUILD_COMMAND ${_aros_mpfr_build_cmd}
+    INSTALL_COMMAND ${_aros_mpfr_install_cmd}
     DEPENDS crosstools_gmp
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     BUILD_IN_SOURCE OFF
     LOG_DOWNLOAD ON
-    LOG_CONFIGURE ON
-    LOG_BUILD ON
-    LOG_INSTALL ON
+    USES_TERMINAL_CONFIGURE ON
+    USES_TERMINAL_BUILD ON
+    USES_TERMINAL_INSTALL ON
   )
 
   _aros_crosstools_external_source(
@@ -221,6 +284,32 @@ if(AROS_CROSSTOOLS_NATIVE)
     "${_aros_src_dir}/mpc-${AROS_MPC_VERSION}"
     URLS "https://ftp.gnu.org/gnu/mpc/mpc-${AROS_MPC_VERSION}.tar.gz"
     ARCHIVE_NAMES "mpc-${AROS_MPC_VERSION}.tar.gz"
+  )
+  set(_aros_mpc_log_dir "${_aros_gnu_root}/logs/mpc")
+  _aros_crosstools_live_log_command(
+    _aros_mpc_configure_cmd
+    "${_aros_mpc_log_dir}"
+    configure
+    <SOURCE_DIR>/configure
+    --prefix=${AROS_CROSSTOOLS_INSTALL_DIR}
+    --disable-shared
+    --enable-static
+    --bindir=${AROS_CROSSTOOLS_INSTALL_DIR}/bin
+    --libdir=${AROS_CROSSTOOLS_INSTALL_DIR}/lib
+    CPPFLAGS=-I${AROS_CROSSTOOLS_INSTALL_DIR}/include
+    LDFLAGS=-L${AROS_CROSSTOOLS_INSTALL_DIR}/lib
+  )
+  _aros_crosstools_live_log_command(
+    _aros_mpc_build_cmd
+    "${_aros_mpc_log_dir}"
+    build
+    "${_aros_make_program_local}" -j1
+  )
+  _aros_crosstools_live_log_command(
+    _aros_mpc_install_cmd
+    "${_aros_mpc_log_dir}"
+    install
+    "${_aros_make_program_local}" -j1 install
   )
   ExternalProject_Add(crosstools_mpc
     ${_aros_mpc_source_args}
@@ -230,23 +319,16 @@ if(AROS_CROSSTOOLS_NATIVE)
       "${CMAKE_COMMAND}" -E env
       "CFLAGS=${AROS_CROSSTOOLS_HOST_CFLAGS}"
       "CXXFLAGS=${AROS_CROSSTOOLS_HOST_CXXFLAGS}"
-      <SOURCE_DIR>/configure
-      --prefix=${AROS_CROSSTOOLS_INSTALL_DIR}
-      --disable-shared
-      --enable-static
-      --bindir=${AROS_CROSSTOOLS_INSTALL_DIR}/bin
-      --libdir=${AROS_CROSSTOOLS_INSTALL_DIR}/lib
-      CPPFLAGS=-I${AROS_CROSSTOOLS_INSTALL_DIR}/include
-      LDFLAGS=-L${AROS_CROSSTOOLS_INSTALL_DIR}/lib
-    BUILD_COMMAND "${_aros_make_program_local}" -j1
-    INSTALL_COMMAND "${_aros_make_program_local}" -j1 install
+      ${_aros_mpc_configure_cmd}
+    BUILD_COMMAND ${_aros_mpc_build_cmd}
+    INSTALL_COMMAND ${_aros_mpc_install_cmd}
     DEPENDS crosstools_gmp crosstools_mpfr
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     BUILD_IN_SOURCE OFF
     LOG_DOWNLOAD ON
-    LOG_CONFIGURE ON
-    LOG_BUILD ON
-    LOG_INSTALL ON
+    USES_TERMINAL_CONFIGURE ON
+    USES_TERMINAL_BUILD ON
+    USES_TERMINAL_INSTALL ON
   )
 
   set(_aros_binutils_extra
@@ -282,6 +364,25 @@ if(AROS_CROSSTOOLS_NATIVE)
     URLS "https://ftp.gnu.org/gnu/binutils/binutils-${AROS_BINUTILS_VERSION}.tar.xz"
     ARCHIVE_NAMES "binutils-${AROS_BINUTILS_VERSION}.tar.xz" "binutils-${AROS_BINUTILS_VERSION}.tar.bz2"
   )
+  set(_aros_binutils_log_dir "${_aros_gnu_root}/logs/binutils")
+  _aros_crosstools_live_log_command(
+    _aros_binutils_configure_cmd
+    "${_aros_binutils_log_dir}"
+    configure
+    <SOURCE_DIR>/configure --prefix=${AROS_CROSSTOOLS_INSTALL_DIR} ${_aros_binutils_extra}
+  )
+  _aros_crosstools_live_log_command(
+    _aros_binutils_build_cmd
+    "${_aros_binutils_log_dir}"
+    build
+    "${_aros_make_program_local}" ${_aros_native_make_build_args} MAKEINFO=true
+  )
+  _aros_crosstools_live_log_command(
+    _aros_binutils_install_cmd
+    "${_aros_binutils_log_dir}"
+    install
+    "${_aros_make_program_local}" -j1 MAKEINFO=true install
+  )
   ExternalProject_Add(crosstools_binutils
     ${_aros_binutils_source_args}
     PREFIX "${_aros_gnu_root}/binutils"
@@ -291,16 +392,16 @@ if(AROS_CROSSTOOLS_NATIVE)
       "${CMAKE_COMMAND}" -E env
       "CFLAGS=${AROS_CROSSTOOLS_HOST_CFLAGS}"
       "CXXFLAGS=${AROS_CROSSTOOLS_HOST_CXXFLAGS}"
-      <SOURCE_DIR>/configure --prefix=${AROS_CROSSTOOLS_INSTALL_DIR} ${_aros_binutils_extra}
-    BUILD_COMMAND "${_aros_make_program_local}" ${_aros_native_make_build_args} MAKEINFO=true
-    INSTALL_COMMAND "${_aros_make_program_local}" -j1 MAKEINFO=true install
+      ${_aros_binutils_configure_cmd}
+    BUILD_COMMAND ${_aros_binutils_build_cmd}
+    INSTALL_COMMAND ${_aros_binutils_install_cmd}
     DEPENDS crosstools_gmp crosstools_isl crosstools_mpfr crosstools_mpc
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     BUILD_IN_SOURCE OFF
     LOG_DOWNLOAD ON
-    LOG_CONFIGURE ON
-    LOG_BUILD ON
-    LOG_INSTALL ON
+    USES_TERMINAL_CONFIGURE ON
+    USES_TERMINAL_BUILD ON
+    USES_TERMINAL_INSTALL ON
   )
 
   set(_aros_gcc_patch "${CMAKE_SOURCE_DIR}/tools/crosstools/gnu/gcc-${AROS_GCC_VERSION}-aros.diff")
@@ -416,6 +517,25 @@ if(AROS_CROSSTOOLS_NATIVE)
       "https://ftp.mirrorservice.org/sites/sourceware.org/pub/gcc/releases/gcc-${AROS_GCC_VERSION}/gcc-${AROS_GCC_VERSION}.tar.xz"
     ARCHIVE_NAMES "gcc-${AROS_GCC_VERSION}.tar.xz"
   )
+  set(_aros_gcc_log_dir "${_aros_gnu_root}/logs/gcc")
+  _aros_crosstools_live_log_command(
+    _aros_gcc_configure_cmd
+    "${_aros_gcc_log_dir}"
+    configure
+    <SOURCE_DIR>/configure --prefix=${AROS_CROSSTOOLS_INSTALL_DIR} ${_aros_gcc_extra}
+  )
+  _aros_crosstools_live_log_command(
+    _aros_gcc_build_cmd
+    "${_aros_gcc_log_dir}"
+    build
+    "${_aros_make_program_local}" ${_aros_native_make_build_args} ${_aros_gcc_build_targets}
+  )
+  _aros_crosstools_live_log_command(
+    _aros_gcc_install_cmd
+    "${_aros_gcc_log_dir}"
+    install
+    "${_aros_make_program_local}" -j1 ${_aros_gcc_install_targets}
+  )
   ExternalProject_Add(crosstools_gcc
     ${_aros_gcc_source_args}
     ${_aros_gcc_url_hash_arg}
@@ -426,16 +546,16 @@ if(AROS_CROSSTOOLS_NATIVE)
       "${CMAKE_COMMAND}" -E env
       "CFLAGS=${AROS_CROSSTOOLS_HOST_CFLAGS}"
       "CXXFLAGS=${AROS_CROSSTOOLS_HOST_CXXFLAGS}"
-      <SOURCE_DIR>/configure --prefix=${AROS_CROSSTOOLS_INSTALL_DIR} ${_aros_gcc_extra}
-    BUILD_COMMAND "${_aros_make_program_local}" ${_aros_native_make_build_args} ${_aros_gcc_build_targets}
-    INSTALL_COMMAND "${_aros_make_program_local}" -j1 ${_aros_gcc_install_targets}
+      ${_aros_gcc_configure_cmd}
+    BUILD_COMMAND ${_aros_gcc_build_cmd}
+    INSTALL_COMMAND ${_aros_gcc_install_cmd}
     DEPENDS crosstools_binutils aros-crosstools-collect-aros crosstools_gmp crosstools_isl crosstools_mpfr crosstools_mpc
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     BUILD_IN_SOURCE OFF
     LOG_DOWNLOAD ON
-    LOG_CONFIGURE ON
-    LOG_BUILD ON
-    LOG_INSTALL ON
+    USES_TERMINAL_CONFIGURE ON
+    USES_TERMINAL_BUILD ON
+    USES_TERMINAL_INSTALL ON
   )
 
   add_custom_target(
@@ -468,6 +588,19 @@ if(AROS_CROSSTOOLS_NATIVE)
     if(NOT _aros_git_program)
       message(WARNING "git not found, disabling vasm build")
     else()
+      set(_aros_vasm_log_dir "${_aros_gnu_root}/logs/vasm")
+      _aros_crosstools_live_log_command(
+        _aros_vasm_build_cmd
+        "${_aros_vasm_log_dir}"
+        build
+        "${_aros_make_program_local}" ${_aros_native_make_build_args} CPU=m68k SYNTAX=mot
+      )
+      _aros_crosstools_live_log_command(
+        _aros_vasm_install_cmd
+        "${_aros_vasm_log_dir}"
+        install
+        "${CMAKE_COMMAND}" -E copy_if_different <SOURCE_DIR>/vasmm68k_mot "${AROS_CROSSTOOLS_INSTALL_DIR}/vasmm68k_mot"
+      )
       ExternalProject_Add(crosstools_vasm
         GIT_REPOSITORY "https://github.com/leffmann/vasm"
         GIT_TAG "master"
@@ -476,15 +609,16 @@ if(AROS_CROSSTOOLS_NATIVE)
         PREFIX "${_aros_gnu_root}/vasm"
         SOURCE_DIR "${_aros_src_dir}/vasm"
         CONFIGURE_COMMAND ""
-        BUILD_COMMAND "${_aros_make_program_local}" ${_aros_native_make_build_args} CPU=m68k SYNTAX=mot
+        BUILD_COMMAND ${_aros_vasm_build_cmd}
         INSTALL_COMMAND
+          /bin/bash "${CMAKE_SOURCE_DIR}/cmake/run_with_live_log.sh" "${_aros_vasm_log_dir}/install.log"
           "${CMAKE_COMMAND}" -E copy_if_different <SOURCE_DIR>/vasmm68k_mot "${AROS_CROSSTOOLS_INSTALL_DIR}/vasmm68k_mot"
           COMMAND "${CMAKE_COMMAND}" -E copy_if_different <SOURCE_DIR>/vobjdump "${AROS_CROSSTOOLS_INSTALL_DIR}/vobjdump"
         BUILD_IN_SOURCE ON
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
         LOG_DOWNLOAD ON
-        LOG_BUILD ON
-        LOG_INSTALL ON
+        USES_TERMINAL_BUILD ON
+        USES_TERMINAL_INSTALL ON
       )
       add_dependencies(aros-crosstools-toolchain crosstools_vasm)
     endif()

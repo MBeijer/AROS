@@ -87,6 +87,7 @@ Constraint: avoid changing legacy build scripts/sources unless absolutely requir
 ### User guidance and confirmed build-shape findings
 - Keep updating this file when new migration-relevant information or constraints are discovered during the session.
 - When regenerating `cmake-build-debug`, always use the Ninja generator (`cmake -G Ninja ...`).
+- Keep compile and tool output visible in the normal build stream. Log files are allowed as mirrors for debugging, but they must not replace live stdout/stderr.
 - `rom/mmakefile.src` expresses ROM build order; use it as the reference ordering when introducing native CMake ROM targets.
 - ROM modules can depend on each other. `exec` is part of ROM and should be treated as an early/native producer of headers and related developer include surfaces needed by downstream ROM modules.
 - Module include dependencies are explicitly expressed in module `mmakefile.src` files through `#MM <module>-includes : ...` lines. Example from `rom/utility/mmakefile.src`:
@@ -103,6 +104,14 @@ Constraint: avoid changing legacy build scripts/sources unless absolutely requir
 - Generic `genmodule` CMake support now needs to read active-layer `arch/<layer>/<module>/mmakefile.src` files, not just source-directory overrides, because those manifests define archspecific source additions/overrides, flags, and linklib pieces.
 - Layered include precedence matters just as much as layered source precedence. Active layer include directories must come before the base module directory so headers like `exec_platform.h` resolve to the active layer version.
 - Native include staging must also honor `arch/*-all/include/mmakefile.src` `copy_includes` rules, because some active headers depend on support headers from sibling CPU namespaces.
+- Configure-time module `INTERFACE` targets must publish more than just the staged global include root.
+  - They should expose active layer directories, module/user include dirs from `USER_INCLUDES`, active-layer `make.opts` include additions, and `%get_archincludes` results where applicable.
+  - `CURDIR` / `MAINDIR` token expansion matters for that configure-time include surface just as it does in the build-time mmake parser.
+- A clean-clone CMake configure cannot assume `legacy-main/bin/<target>/gen/config/target.cfg` already exists.
+  - Native module registration parses legacy mmake/config metadata during CMake configure, so the root CMake configure path must bootstrap the legacy `configure` step early enough to create the first-pass config files in `legacy-main`.
+  - The correct first-pass outputs from legacy `configure` are the core config files such as `target.cfg`, `build.cfg`, `conf.cmake`, `make.defaults`, `config/make.cfg`, and `mmake.config`.
+  - `compiler.cfg` is not a guaranteed first-pass `configure` output, so bootstrap validation must not require it.
+  - `_aros_get_target_context()` should also tolerate a missing `target.cfg` and fall back to the `AROS_TARGET` arch/family split instead of hard-failing the whole CMake configure.
 - Current concrete blocker for `aros-rom-exec-native` is generated-header fidelity, not legacy build behavior:
   - `compiler/include/mmakefile.src` rewrites `exec/execbase.h` with `sed` for the SMP/private-field layout.
   - current native include staging still copies `compiler/include/exec/execbase.inc` too literally.
@@ -358,6 +367,12 @@ Wrap temporary compatibility blocks in CMake with explicit `START LEGACY` / `END
   - The CMake-native generic module builder must therefore skip `RESIDENT_BEGIN` injection for `modtype=handler`; otherwise handlers gain an extra `__resident_entry` stub at address `0`, shifting the real handler entry and breaking parity.
 - Current non-fatal cleanup item:
   - some native module links still emit `objdump` / `nm` lookup warnings because those tools are still being resolved under the crosstools root without `/bin`
+- The repeated "always rebuild" behavior on settled ROM targets was not caused by the phony per-module convenience targets.
+  - The concrete root cause was incorrect CMake byproduct registration for genmodule `_rel` archives on modules whose `.conf` files do not enable `rellinklib`.
+  - Legacy only emits `_rel` archives for modules that explicitly opt into `rellinklib` (for example `utility`), so declaring `_rel` outputs for modules like `aros`, `dos`, or `exec` leaves Ninja chasing outputs that never exist.
+  - After fixing that in `cmake/AROSModule.cmake`, a settled `ninja -d explain aros-rom-utility-native` returns `no work to do` apart from normal `VerifyGlobs.cmake_force` glob verification.
+- Do not run multiple configure/build commands against the same Ninja build directory in parallel.
+  - `aros-configure` can be re-entered from different targets, and racing `cmake --build` / `ninja` invocations against one `cmake-build-debug` tree can corrupt the in-flight `legacy-main` configure probe state and produce false `config.log` failures.
 Never change legacy build scripts, legacy patches, legacy configure logic, legacy `mmake` files, or legacy toolchain behavior in order to make CMake migration progress.
 The legacy build system is the correctness reference.
 Use the legacy build only to verify expected behavior and output parity for the new CMake path.

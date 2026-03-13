@@ -37,10 +37,14 @@ function(_aros_get_target_context out_arch out_cpu out_variant out_family)
   endif()
 
   set(_target_cfg "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg")
-  file(STRINGS "${_target_cfg}" _family_line REGEX "^FAMILY[ \t]*:=")
-  if(_family_line)
-    string(REGEX REPLACE "^FAMILY[ \t]*:=[ \t]*" "" _family "${_family_line}")
-    string(STRIP "${_family}" _family)
+  if(EXISTS "${_target_cfg}")
+    file(STRINGS "${_target_cfg}" _family_line REGEX "^FAMILY[ \t]*:=")
+    if(_family_line)
+      string(REGEX REPLACE "^FAMILY[ \t]*:=[ \t]*" "" _family "${_family_line}")
+      string(STRIP "${_family}" _family)
+    else()
+      set(_family "${_arch}")
+    endif()
   else()
     set(_family "${_arch}")
   endif()
@@ -179,6 +183,33 @@ function(_aros_split_make_arguments input_value out_var)
   set(${out_var} "${_arguments}" PARENT_SCOPE)
 endfunction()
 
+function(_aros_set_make_context_for_file file_path)
+  get_filename_component(_file_dir "${file_path}" DIRECTORY)
+  if(IS_ABSOLUTE "${_file_dir}")
+    file(RELATIVE_PATH _context_curdir "${CMAKE_SOURCE_DIR}" "${_file_dir}")
+  else()
+    set(_context_curdir "${_file_dir}")
+  endif()
+
+  if(_context_curdir MATCHES "^\\.\\.?(/|$)")
+    if(ARGC GREATER 1 AND NOT "${ARGV1}" STREQUAL "")
+      set(_context_curdir "${ARGV1}")
+    else()
+      set(_context_curdir "")
+    endif()
+  endif()
+
+  set(_context_maindir "")
+  if(ARGC GREATER 1 AND NOT "${ARGV1}" STREQUAL "")
+    set(_context_maindir "${ARGV1}")
+  else()
+    set(_context_maindir "${_context_curdir}")
+  endif()
+
+  set(_AROS_MMAKE_CONTEXT_CURDIR "${_context_curdir}" PARENT_SCOPE)
+  set(_AROS_MMAKE_CONTEXT_MAINDIR "${_context_maindir}" PARENT_SCOPE)
+endfunction()
+
 function(_aros_expand_make_tokens input_value out_var)
   _aros_get_target_context(_arch _cpu _variant _family)
   set(_expanded "${input_value}")
@@ -263,7 +294,17 @@ function(_aros_expand_make_tokens input_value out_var)
     elseif(_var_name STREQUAL "SRCDIR")
       set(_replacement "${CMAKE_SOURCE_DIR}")
     elseif(_var_name STREQUAL "CURDIR")
-      set(_replacement "")
+      if(DEFINED _AROS_MMAKE_CONTEXT_CURDIR AND NOT _AROS_MMAKE_CONTEXT_CURDIR STREQUAL "")
+        set(_replacement "${_AROS_MMAKE_CONTEXT_CURDIR}")
+      else()
+        set(_replacement "")
+      endif()
+    elseif(_var_name STREQUAL "MAINDIR")
+      if(DEFINED _AROS_MMAKE_CONTEXT_MAINDIR AND NOT _AROS_MMAKE_CONTEXT_MAINDIR STREQUAL "")
+        set(_replacement "${_AROS_MMAKE_CONTEXT_MAINDIR}")
+      else()
+        set(_replacement "")
+      endif()
     elseif(_var_name STREQUAL "GENDIR")
       set(_replacement "${_make_gendir}")
     else()
@@ -348,6 +389,337 @@ function(_aros_remove_token_entries var_name)
     endif()
   endforeach()
   set(${var_name} "${_filtered_values}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_condition_stack_is_active condition_stack out_var)
+  set(_active TRUE)
+  foreach(_condition IN LISTS condition_stack)
+    if(NOT _condition)
+      set(_active FALSE)
+      break()
+    endif()
+  endforeach()
+  set(${out_var} "${_active}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_evaluate_mmake_condition line out_var)
+  if(line MATCHES "^ifneq[ \t]*\\((.*),(.*)\\)$")
+    set(_left "${CMAKE_MATCH_1}")
+    set(_right "${CMAKE_MATCH_2}")
+    _aros_expand_make_tokens("${_left}" _left_expanded)
+    _aros_expand_make_tokens("${_right}" _right_expanded)
+    if(NOT _left_expanded STREQUAL _right_expanded)
+      set(${out_var} TRUE PARENT_SCOPE)
+    else()
+      set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+  elseif(line MATCHES "^ifeq[ \t]*\\((.*),(.*)\\)$")
+    set(_left "${CMAKE_MATCH_1}")
+    set(_right "${CMAKE_MATCH_2}")
+    _aros_expand_make_tokens("${_left}" _left_expanded)
+    _aros_expand_make_tokens("${_right}" _right_expanded)
+    if(_left_expanded STREQUAL _right_expanded)
+      set(${out_var} TRUE PARENT_SCOPE)
+    else()
+      set(${out_var} FALSE PARENT_SCOPE)
+    endif()
+  else()
+    message(FATAL_ERROR "Unsupported mmake conditional while parsing CMake metadata: ${line}")
+  endif()
+endfunction()
+
+function(_aros_tokenize_mmake_value input_value out_var)
+  if("${input_value}" STREQUAL "")
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  separate_arguments(_tokens NATIVE_COMMAND "${input_value}")
+  _aros_remove_empty_entries(_tokens)
+  _aros_remove_token_entries(_tokens "\\")
+  set(${out_var} "${_tokens}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_resolve_make_include_path input_path out_var)
+  if("${input_path}" STREQUAL "")
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  if(IS_ABSOLUTE "${input_path}")
+    set(_resolved_path "${input_path}")
+  else()
+    if(DEFINED _AROS_MMAKE_CONTEXT_CURDIR AND NOT _AROS_MMAKE_CONTEXT_CURDIR STREQUAL "")
+      set(_base_dir "${CMAKE_SOURCE_DIR}/${_AROS_MMAKE_CONTEXT_CURDIR}")
+    else()
+      set(_base_dir "${CMAKE_SOURCE_DIR}")
+    endif()
+    get_filename_component(_resolved_path "${input_path}" ABSOLUTE BASE_DIR "${_base_dir}")
+  endif()
+
+  set(${out_var} "${_resolved_path}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_extract_include_dirs_from_tokens input_tokens out_var)
+  set(_include_dirs)
+  set(_pending_flag "")
+
+  foreach(_token IN LISTS input_tokens)
+    if(NOT _pending_flag STREQUAL "")
+      _aros_resolve_make_include_path("${_token}" _resolved_include_dir)
+      if(NOT _resolved_include_dir STREQUAL "")
+        list(APPEND _include_dirs "${_resolved_include_dir}")
+      endif()
+      set(_pending_flag "")
+      continue()
+    endif()
+
+    if(_token MATCHES "^(-I|-iquote|-isystem|-idirafter)(.+)$")
+      _aros_resolve_make_include_path("${CMAKE_MATCH_2}" _resolved_include_dir)
+      if(NOT _resolved_include_dir STREQUAL "")
+        list(APPEND _include_dirs "${_resolved_include_dir}")
+      endif()
+    elseif(_token STREQUAL "-I"
+           OR _token STREQUAL "-iquote"
+           OR _token STREQUAL "-isystem"
+           OR _token STREQUAL "-idirafter")
+      set(_pending_flag "${_token}")
+    endif()
+  endforeach()
+
+  list(REMOVE_DUPLICATES _include_dirs)
+  set(${out_var} "${_include_dirs}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_collect_archincludes maindir modname out_var)
+  get_filename_component(_module_dir_name "${maindir}" NAME)
+
+  set(_archinclude_mmakefiles)
+  set(_module_mmakefile "${CMAKE_SOURCE_DIR}/${maindir}/mmakefile.src")
+  if(EXISTS "${_module_mmakefile}")
+    aros_layering_extract_primary_mmake_name("${_module_mmakefile}" _archinclude_mmake_name)
+    if(NOT _archinclude_mmake_name STREQUAL "")
+      aros_layering_collect_resolved_module_layer_mmakefiles(
+        "${_module_dir_name}"
+        "${_archinclude_mmake_name}"
+        _archinclude_mmakefiles
+        _archinclude_layers
+        _archinclude_aliases
+      )
+    endif()
+  endif()
+
+  if(NOT _archinclude_mmakefiles)
+    _aros_collect_active_module_layer_mmakefiles("${_module_dir_name}" _archinclude_mmakefiles)
+  endif()
+
+  set(_archinclude_entries)
+  foreach(_mmakefile_path IN LISTS _archinclude_mmakefiles)
+    if(NOT EXISTS "${_mmakefile_path}")
+      continue()
+    endif()
+
+    _aros_set_make_context_for_file("${_mmakefile_path}" "${maindir}")
+    _aros_read_mmake_logical_lines("${_mmakefile_path}" _logical_lines)
+    set(_condition_stack)
+    foreach(_line IN LISTS _logical_lines)
+      if(_line MATCHES "^#")
+        continue()
+      endif()
+      if(_line MATCHES "^ifn?eq[ \t]*\\(.*\\)$")
+        _aros_evaluate_mmake_condition("${_line}" _condition_value)
+        list(APPEND _condition_stack "${_condition_value}")
+        continue()
+      elseif(_line STREQUAL "else")
+        list(LENGTH _condition_stack _condition_len)
+        if(_condition_len GREATER 0)
+          math(EXPR _last_index "${_condition_len} - 1")
+          list(GET _condition_stack "${_last_index}" _last_value)
+          if(_last_value)
+            set(_new_value FALSE)
+          else()
+            set(_new_value TRUE)
+          endif()
+          list(REMOVE_AT _condition_stack "${_last_index}")
+          list(APPEND _condition_stack "${_new_value}")
+        endif()
+        continue()
+      elseif(_line STREQUAL "endif")
+        list(LENGTH _condition_stack _condition_len)
+        if(_condition_len GREATER 0)
+          math(EXPR _last_index "${_condition_len} - 1")
+          list(REMOVE_AT _condition_stack "${_last_index}")
+        endif()
+        continue()
+      endif()
+
+      _aros_condition_stack_is_active("${_condition_stack}" _condition_active)
+      if(NOT _condition_active OR NOT _line MATCHES "^%set_archincludes[ \t]+(.*)$")
+        continue()
+      endif()
+
+      _aros_expand_make_tokens("${CMAKE_MATCH_1}" _expanded_args)
+      separate_arguments(_arg_tokens NATIVE_COMMAND "${_expanded_args}")
+
+      set(_entry_modname "")
+      set(_entry_maindir "")
+      set(_entry_pri "999")
+      set(_entry_includes "")
+      set(_pending_key "")
+
+      foreach(_arg_token IN LISTS _arg_tokens)
+        if(NOT _arg_token MATCHES "^([^=]+)=(.*)$")
+          if(NOT _pending_key STREQUAL "")
+            set(_pending_var "_entry_${_pending_key}")
+            if("${${_pending_var}}" STREQUAL "")
+              set(${_pending_var} "${_arg_token}")
+            else()
+              string(APPEND ${_pending_var} " ${_arg_token}")
+            endif()
+          endif()
+          continue()
+        endif()
+
+        set(_arg_key "${CMAKE_MATCH_1}")
+        set(_arg_value "${CMAKE_MATCH_2}")
+        if(_arg_key STREQUAL "modname")
+          set(_pending_key "")
+          set(_entry_modname "${_arg_value}")
+        elseif(_arg_key STREQUAL "maindir")
+          set(_pending_key "")
+          set(_entry_maindir "${_arg_value}")
+        elseif(_arg_key STREQUAL "pri")
+          set(_pending_key "")
+          set(_entry_pri "${_arg_value}")
+        elseif(_arg_key STREQUAL "includes")
+          set(_pending_key "includes")
+          set(_entry_includes "${_arg_value}")
+        else()
+          set(_pending_key "")
+        endif()
+      endforeach()
+
+      if(NOT _entry_modname STREQUAL "${modname}" OR NOT _entry_maindir STREQUAL "${maindir}")
+        continue()
+      endif()
+
+      set(_entry_pri_padded "${_entry_pri}")
+      string(REGEX REPLACE "^([0-9])$" "00\\1" _entry_pri_padded "${_entry_pri_padded}")
+      string(REGEX REPLACE "^([0-9][0-9])$" "0\\1" _entry_pri_padded "${_entry_pri_padded}")
+      string(REPLACE ";" "\\;" _entry_includes "${_entry_includes}")
+      list(APPEND _archinclude_entries "${_entry_pri_padded}|${_entry_includes}")
+    endforeach()
+  endforeach()
+
+  list(SORT _archinclude_entries)
+
+  set(_collected_includes)
+  foreach(_entry IN LISTS _archinclude_entries)
+    string(REGEX REPLACE "^[0-9][0-9][0-9]\\|" "" _entry_includes "${_entry}")
+    _aros_tokenize_mmake_value("${_entry_includes}" _entry_include_tokens)
+    list(APPEND _collected_includes ${_entry_include_tokens})
+  endforeach()
+
+  set(${out_var} "${_collected_includes}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_collect_make_variable_from_file file_path variable_name out_var)
+  if(NOT EXISTS "${file_path}")
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+
+  set(_maindir "")
+  if(ARGC GREATER 3)
+    set(_maindir "${ARGV3}")
+  endif()
+
+  _aros_set_make_context_for_file("${file_path}" "${_maindir}")
+  _aros_read_mmake_logical_lines("${file_path}" _logical_lines)
+
+  set(_values)
+  set(_condition_stack)
+  foreach(_line IN LISTS _logical_lines)
+    if(_line MATCHES "^#")
+      continue()
+    endif()
+    if(_line MATCHES "^ifn?eq[ \t]*\\(.*\\)$")
+      _aros_evaluate_mmake_condition("${_line}" _condition_value)
+      list(APPEND _condition_stack "${_condition_value}")
+      continue()
+    elseif(_line STREQUAL "else")
+      list(LENGTH _condition_stack _condition_len)
+      if(_condition_len GREATER 0)
+        math(EXPR _last_index "${_condition_len} - 1")
+        list(GET _condition_stack "${_last_index}" _last_value)
+        if(_last_value)
+          set(_new_value FALSE)
+        else()
+          set(_new_value TRUE)
+        endif()
+        list(REMOVE_AT _condition_stack "${_last_index}")
+        list(APPEND _condition_stack "${_new_value}")
+      endif()
+      continue()
+    elseif(_line STREQUAL "endif")
+      list(LENGTH _condition_stack _condition_len)
+      if(_condition_len GREATER 0)
+        math(EXPR _last_index "${_condition_len} - 1")
+        list(REMOVE_AT _condition_stack "${_last_index}")
+      endif()
+      continue()
+    endif()
+
+    _aros_condition_stack_is_active("${_condition_stack}" _condition_active)
+    if(NOT _condition_active)
+      continue()
+    endif()
+
+    if(_line MATCHES "^${variable_name}[ \t]*(\\+=|:?=)[ \t]*(.*)$")
+      set(_assign_mode "${CMAKE_MATCH_1}")
+      set(_value "${CMAKE_MATCH_2}")
+      _aros_expand_make_tokens("${_value}" _expanded_value)
+      _aros_tokenize_mmake_value("${_expanded_value}" _expanded_tokens)
+      if(_assign_mode STREQUAL "+=")
+        list(APPEND _values ${_expanded_tokens})
+      else()
+        set(_values ${_expanded_tokens})
+      endif()
+      continue()
+    endif()
+
+    if(variable_name STREQUAL "USER_INCLUDES" AND _line MATCHES "^%get_archincludes[ \t]+(.*)$")
+      _aros_expand_make_tokens("${CMAKE_MATCH_1}" _expanded_args)
+      separate_arguments(_arg_tokens NATIVE_COMMAND "${_expanded_args}")
+
+      set(_archinclude_modname "")
+      set(_archinclude_maindir "")
+      set(_archinclude_flag "USER_INCLUDES")
+      foreach(_arg_token IN LISTS _arg_tokens)
+        if(NOT _arg_token MATCHES "^([^=]+)=(.*)$")
+          continue()
+        endif()
+        set(_arg_key "${CMAKE_MATCH_1}")
+        set(_arg_value "${CMAKE_MATCH_2}")
+        if(_arg_key STREQUAL "modname")
+          set(_archinclude_modname "${_arg_value}")
+        elseif(_arg_key STREQUAL "maindir")
+          set(_archinclude_maindir "${_arg_value}")
+        elseif(_arg_key STREQUAL "includeflag")
+          set(_archinclude_flag "${_arg_value}")
+        endif()
+      endforeach()
+
+      if(_archinclude_flag STREQUAL "${variable_name}" AND _archinclude_modname AND _archinclude_maindir)
+        _aros_collect_archincludes("${_archinclude_maindir}" "${_archinclude_modname}" _resolved_archincludes)
+        list(APPEND _values ${_resolved_archincludes})
+      endif()
+    endif()
+  endforeach()
+
+  _aros_remove_empty_entries(_values)
+  _aros_remove_token_entries(_values "\\")
+  set(${out_var} "${_values}" PARENT_SCOPE)
 endfunction()
 
 function(_aros_collect_link_library_names out_var)
@@ -456,6 +828,32 @@ function(_aros_extract_conf_rellibs conf_path out_var)
 
   list(REMOVE_DUPLICATES _rellibs)
   set(${out_var} "${_rellibs}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_conf_has_option conf_path option_name out_var)
+  if(NOT EXISTS "${conf_path}")
+    set(${out_var} FALSE PARENT_SCOPE)
+    return()
+  endif()
+
+  file(STRINGS "${conf_path}" _conf_option_lines REGEX "^[ \t]*options[ \t]+")
+  set(_has_option FALSE)
+  foreach(_conf_option_line IN LISTS _conf_option_lines)
+    string(REGEX REPLACE "^[ \t]*options[ \t]+" "" _options_text "${_conf_option_line}")
+    string(REPLACE "," ";" _options_list "${_options_text}")
+    foreach(_option_entry IN LISTS _options_list)
+      string(STRIP "${_option_entry}" _option_entry)
+      if(_option_entry STREQUAL "${option_name}")
+        set(_has_option TRUE)
+        break()
+      endif()
+    endforeach()
+    if(_has_option)
+      break()
+    endif()
+  endforeach()
+
+  set(${out_var} "${_has_option}" PARENT_SCOPE)
 endfunction()
 
 function(_aros_collect_interface_dependency_artifacts out_files_var out_targets_var)
@@ -842,6 +1240,95 @@ function(_aros_extract_layer_interface_depends mmake_name out_var)
   set(${out_var} "${_layer_depends}" PARENT_SCOPE)
 endfunction()
 
+function(_aros_append_include_dirs list_var)
+  set(_include_dirs "${${list_var}}")
+  foreach(_include_dir IN LISTS ARGN)
+    if(_include_dir STREQUAL "")
+      continue()
+    endif()
+    list(APPEND _include_dirs "${_include_dir}")
+  endforeach()
+  list(REMOVE_DUPLICATES _include_dirs)
+  set(${list_var} "${_include_dirs}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_append_existing_include_dirs list_var)
+  set(_existing_include_dirs)
+  foreach(_include_dir IN LISTS ARGN)
+    if(IS_DIRECTORY "${_include_dir}")
+      list(APPEND _existing_include_dirs "${_include_dir}")
+    endif()
+  endforeach()
+  _aros_append_include_dirs("${list_var}" ${_existing_include_dirs})
+endfunction()
+
+function(_aros_collect_module_layer_include_dirs module_path module_mmake_name out_var)
+  get_filename_component(_module_dir_name "${module_path}" NAME)
+  _aros_collect_active_module_layer_mmakefiles(
+    "${_module_dir_name}"
+    _layer_mmakefiles
+    "${module_mmake_name}"
+  )
+
+  set(_include_dirs)
+  foreach(_layer_mmakefile IN LISTS _layer_mmakefiles)
+    get_filename_component(_layer_dir "${_layer_mmakefile}" DIRECTORY)
+    list(APPEND _include_dirs "${_layer_dir}")
+  endforeach()
+
+  _aros_append_existing_include_dirs(_include_dirs ${_include_dirs})
+  set(${out_var} "${_include_dirs}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_collect_module_interface_include_dirs module_path module_mmake_name module_sdk module_mmakefile out_var)
+  string(REPLACE "/" "_" _module_id "${module_path}")
+  get_filename_component(_module_dir_name "${module_path}" NAME)
+
+  set(_include_dirs)
+  _aros_collect_active_module_layer_mmakefiles(
+    "${_module_dir_name}"
+    _layer_mmakefiles
+    "${module_mmake_name}"
+  )
+  _aros_collect_module_layer_include_dirs("${module_path}" "${module_mmake_name}" _layer_include_dirs)
+  _aros_append_include_dirs(_include_dirs ${_layer_include_dirs})
+  _aros_append_include_dirs(_include_dirs "${CMAKE_SOURCE_DIR}/${module_path}")
+
+  if(NOT module_mmakefile STREQUAL "")
+    _aros_collect_make_variable_from_file("${module_mmakefile}" "USER_INCLUDES" _module_user_include_tokens "${module_path}")
+    _aros_extract_include_dirs_from_tokens("${_module_user_include_tokens}" _module_user_include_dirs)
+    _aros_append_include_dirs(_include_dirs ${_module_user_include_dirs})
+  endif()
+
+  foreach(_layer_mmakefile IN LISTS _layer_mmakefiles)
+    _aros_collect_make_variable_from_file("${_layer_mmakefile}" "USER_INCLUDES" _layer_user_include_tokens "${module_path}")
+    _aros_extract_include_dirs_from_tokens("${_layer_user_include_tokens}" _layer_user_include_dirs)
+    _aros_append_include_dirs(_include_dirs ${_layer_user_include_dirs})
+
+    get_filename_component(_layer_dir "${_layer_mmakefile}" DIRECTORY)
+    _aros_collect_make_variable_from_file("${_layer_dir}/make.opts" "USER_INCLUDES" _layer_makeopts_include_tokens "${module_path}")
+    _aros_extract_include_dirs_from_tokens("${_layer_makeopts_include_tokens}" _layer_makeopts_include_dirs)
+    _aros_append_include_dirs(_include_dirs ${_layer_makeopts_include_dirs})
+  endforeach()
+
+  if(NOT module_sdk STREQUAL "" AND NOT module_sdk STREQUAL "public")
+    _aros_append_include_dirs(
+      _include_dirs
+      "${AROS_NATIVE_BUILD_SDKS_DIR}/${module_sdk}/include"
+      "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/buildsdks/${module_sdk}/include"
+    )
+  endif()
+
+  _aros_append_include_dirs(
+    _include_dirs
+    "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/${module_path}/include"
+    "${CMAKE_BINARY_DIR}/modules/${_module_id}/genmodule/include"
+    "${AROS_NATIVE_INCLUDE_DIR}"
+  )
+
+  set(${out_var} "${_include_dirs}" PARENT_SCOPE)
+endfunction()
+
 function(aros_register_layered_module_sources_target target_name module_path)
   add_custom_target(
     "${target_name}"
@@ -1052,12 +1539,17 @@ function(aros_register_genmodule_module target_name)
     "${AROS_MODULE_MODULE_SUFFIX}"
     _aros_module_public_linklib_output
   )
-  _aros_get_genmodule_rel_linklib_output(
-    "${AROS_MODULE_MODULE_NAME}"
-    "${AROS_MODULE_MODULE_TYPE}"
-    "${AROS_MODULE_MODULE_SUFFIX}"
-    _aros_module_rel_linklib_output
-  )
+  _aros_conf_has_option("${AROS_MODULE_MODULE_CONF}" "rellinklib" _aros_module_has_rellinklib)
+  if(_aros_module_has_rellinklib)
+    _aros_get_genmodule_rel_linklib_output(
+      "${AROS_MODULE_MODULE_NAME}"
+      "${AROS_MODULE_MODULE_TYPE}"
+      "${AROS_MODULE_MODULE_SUFFIX}"
+      _aros_module_rel_linklib_output
+    )
+  else()
+    set(_aros_module_rel_linklib_output "")
+  endif()
 
   get_property(
     _aros_existing_module_target
@@ -1091,16 +1583,33 @@ function(aros_register_genmodule_module target_name)
       add_dependencies("${target_name}-interfaces" "${_aros_existing_interfaces_build_target}")
     endif()
 
+    set(_aros_existing_interface_include_dirs)
+    if(_aros_existing_interface_target AND TARGET "${_aros_existing_interface_target}")
+      get_target_property(
+        _aros_existing_interface_include_dirs
+        "${_aros_existing_interface_target}"
+        AROS_MODULE_INTERFACE_INCLUDE_DIRS
+      )
+      if(_aros_existing_interface_include_dirs STREQUAL "AROS_MODULE_INTERFACE_INCLUDE_DIRS-NOTFOUND")
+        set(_aros_existing_interface_include_dirs)
+      endif()
+    endif()
+
     add_library("${_aros_module_interface_target}" INTERFACE)
-    target_include_directories(
-      "${_aros_module_interface_target}"
-      INTERFACE
-        "$<BUILD_INTERFACE:${AROS_NATIVE_INCLUDE_DIR}>"
-    )
+    if(_aros_existing_interface_include_dirs)
+      target_include_directories("${_aros_module_interface_target}" INTERFACE ${_aros_existing_interface_include_dirs})
+    else()
+      target_include_directories("${_aros_module_interface_target}" INTERFACE "${AROS_NATIVE_INCLUDE_DIR}")
+    endif()
     if(_aros_existing_interface_target)
       target_link_libraries("${_aros_module_interface_target}" INTERFACE "${_aros_existing_interface_target}")
     endif()
     add_dependencies("${_aros_module_interface_target}" "${target_name}-interfaces")
+    set_target_properties(
+      "${_aros_module_interface_target}"
+      PROPERTIES
+        AROS_MODULE_INTERFACE_INCLUDE_DIRS "${_aros_existing_interface_include_dirs}"
+    )
 
     add_custom_target("${target_name}" DEPENDS "${_aros_existing_output}")
     add_custom_target("${_aros_module_native_abi_target}")
@@ -1264,12 +1773,19 @@ function(aros_register_genmodule_module target_name)
   )
 
   add_custom_target("${target_name}-interfaces" DEPENDS "${_aros_module_interface_stamp}")
-  add_library("${_aros_module_interface_target}" INTERFACE)
-  target_include_directories(
-    "${_aros_module_interface_target}"
-    INTERFACE
-      "$<BUILD_INTERFACE:${AROS_NATIVE_INCLUDE_DIR}>"
+  _aros_collect_module_interface_include_dirs(
+    "${AROS_MODULE_MODULE_PATH}"
+    "${AROS_MODULE_MODULE_MMAKE_NAME}"
+    "${AROS_MODULE_MODULE_SDK}"
+    "${AROS_MODULE_MMAKEFILE_SRC}"
+    _aros_module_interface_include_dirs
   )
+  add_library("${_aros_module_interface_target}" INTERFACE)
+  if(_aros_module_interface_include_dirs)
+    target_include_directories("${_aros_module_interface_target}" INTERFACE ${_aros_module_interface_include_dirs})
+  else()
+    target_include_directories("${_aros_module_interface_target}" INTERFACE "${AROS_NATIVE_INCLUDE_DIR}")
+  endif()
   add_dependencies("${_aros_module_interface_target}" "${target_name}-interfaces")
 
   if(NOT AROS_MODULE_INTERFACE_NAMES)
@@ -1281,6 +1797,7 @@ function(aros_register_genmodule_module target_name)
       AROS_MODULE_INTERFACE_STAMP "${_aros_module_interface_stamp}"
       AROS_MODULE_INTERFACE_NAMES "${AROS_MODULE_INTERFACE_NAMES}"
       AROS_MODULE_INTERFACE_DEPENDS "${AROS_MODULE_INTERFACE_DEPENDS}"
+      AROS_MODULE_INTERFACE_INCLUDE_DIRS "${_aros_module_interface_include_dirs}"
       AROS_MODULE_PUBLIC_LINKLIB_OUTPUT "${_aros_module_public_linklib_output}"
   )
 
@@ -1304,11 +1821,14 @@ function(aros_register_genmodule_module target_name)
     "${_aros_module_interface_target}"
   )
 
+  set(_aros_module_runtime_byproducts "${_aros_module_public_linklib_output}")
+  if(_aros_module_rel_linklib_output)
+    list(APPEND _aros_module_runtime_byproducts "${_aros_module_rel_linklib_output}")
+  endif()
+
   add_custom_command(
     OUTPUT "${_aros_module_output}"
-    BYPRODUCTS
-      "${_aros_module_public_linklib_output}"
-      "${_aros_module_rel_linklib_output}"
+    BYPRODUCTS ${_aros_module_runtime_byproducts}
     COMMAND "${CMAKE_COMMAND}"
             -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
@@ -1400,17 +1920,19 @@ function(aros_register_genmodule_module target_name)
     PROPERTY "AROS_REGISTERED_GENMODULE_PUBLIC_LINKLIB_TARGET_${_aros_module_name_key}"
     "${target_name}"
   )
-  _aros_sanitize_property_key("${AROS_MODULE_MODULE_NAME}_rel" _aros_module_rel_name_key)
-  set_property(
-    GLOBAL
-    PROPERTY "AROS_REGISTERED_GENMODULE_REL_LINKLIB_OUTPUT_${_aros_module_rel_name_key}"
-    "${_aros_module_rel_linklib_output}"
-  )
-  set_property(
-    GLOBAL
-    PROPERTY "AROS_REGISTERED_GENMODULE_REL_LINKLIB_TARGET_${_aros_module_rel_name_key}"
-    "${target_name}"
-  )
+  if(_aros_module_rel_linklib_output)
+    _aros_sanitize_property_key("${AROS_MODULE_MODULE_NAME}_rel" _aros_module_rel_name_key)
+    set_property(
+      GLOBAL
+      PROPERTY "AROS_REGISTERED_GENMODULE_REL_LINKLIB_OUTPUT_${_aros_module_rel_name_key}"
+      "${_aros_module_rel_linklib_output}"
+    )
+    set_property(
+      GLOBAL
+      PROPERTY "AROS_REGISTERED_GENMODULE_REL_LINKLIB_TARGET_${_aros_module_rel_name_key}"
+      "${target_name}"
+    )
+  endif()
 endfunction()
 
 function(aros_register_mmake_genmodule_module target_name)
@@ -1683,6 +2205,7 @@ function(aros_finalize_module_interfaces)
     endif()
 
     set(_aros_interface_dep_targets)
+    set(_aros_interface_dep_include_dirs)
     foreach(_aros_dep_node IN LISTS _aros_interface_dep_nodes)
       _aros_sanitize_property_key("${_aros_dep_node}" _aros_dep_key)
       get_property(_aros_dep_target GLOBAL PROPERTY "AROS_MODULE_INTERFACE_TARGET_${_aros_dep_key}")
@@ -1691,13 +2214,40 @@ function(aros_finalize_module_interfaces)
       endif()
       if(TARGET "${_aros_dep_target}")
         list(APPEND _aros_interface_dep_targets "${_aros_dep_target}")
+        get_target_property(
+          _aros_dep_include_dirs
+          "${_aros_dep_target}"
+          AROS_MODULE_INTERFACE_INCLUDE_DIRS
+        )
+        if(_aros_dep_include_dirs AND NOT _aros_dep_include_dirs STREQUAL "AROS_MODULE_INTERFACE_INCLUDE_DIRS-NOTFOUND")
+          list(APPEND _aros_interface_dep_include_dirs ${_aros_dep_include_dirs})
+        endif()
       endif()
     endforeach()
 
     list(REMOVE_DUPLICATES _aros_interface_dep_targets)
+    list(REMOVE_DUPLICATES _aros_interface_dep_include_dirs)
     if(_aros_interface_dep_targets)
       target_link_libraries("${_aros_interface_target}" INTERFACE ${_aros_interface_dep_targets})
       add_dependencies("${_aros_interface_target}" ${_aros_interface_dep_targets})
+    endif()
+    if(_aros_interface_dep_include_dirs)
+      get_target_property(
+        _aros_interface_include_dirs
+        "${_aros_interface_target}"
+        AROS_MODULE_INTERFACE_INCLUDE_DIRS
+      )
+      if(_aros_interface_include_dirs STREQUAL "AROS_MODULE_INTERFACE_INCLUDE_DIRS-NOTFOUND")
+        set(_aros_interface_include_dirs)
+      endif()
+      list(APPEND _aros_interface_include_dirs ${_aros_interface_dep_include_dirs})
+      list(REMOVE_DUPLICATES _aros_interface_include_dirs)
+      target_include_directories("${_aros_interface_target}" INTERFACE ${_aros_interface_dep_include_dirs})
+      set_target_properties(
+        "${_aros_interface_target}"
+        PROPERTIES
+          AROS_MODULE_INTERFACE_INCLUDE_DIRS "${_aros_interface_include_dirs}"
+      )
     endif()
 
   endforeach()
