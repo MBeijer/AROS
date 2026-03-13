@@ -405,6 +405,30 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
   - do not use autolibs, target C libs, or ordinary native linklib targets to create owner-target dependencies in the finalizer; that creates artificial cycles through the SDK/interface aggregate graph
   - SDK-only registrations (`*-sdk-native`) must stay out of this runtime-order pass entirely
   - concrete case: clean CLion/Ninja builds were failing in `aros-rom-aros-native` with `x86_64-aros-ld: cannot find -lexec` because `rom/aros` registered before `rom/exec`; the shared fix is to add a late dependency only on the `exec` genmodule producer, not on the wider archive/autolib universe
+- Current clean-build native archive-order finding:
+  - native module archive dependencies must be modeled as file-level dependencies on the produced `.a` archives, not target-level dependencies between the owning utility targets
+  - using utility-target dependencies for genmodule/public/`_rel` archives creates artificial SCCs in CMake (`graphics`, `utility`, `intuition`, `hyperlayers`, workbench SDK producers) and then file-level cycles in Ninja
+  - the shared fix is:
+    - late-resolve archive outputs after registration settles
+    - feed only archive file paths into the runtime custom-command dependency set
+    - keep genmodule/public/`_rel` archive target names out of the runtime target graph
+- Current genmodule ownership finding:
+  - public and `_rel` genmodule linklib archives must belong to the interface phase, not the runtime module phase
+  - the interface custom command should publish those archives as byproducts, and `build_genmodule_module.cmake` should emit them in `INTERFACE_ONLY` mode
+  - the runtime module custom command must no longer own those archives as byproducts; otherwise clean builds create cross-module archive cycles such as `libgraphics.a -> libutility_rel.a -> libintuition.a -> liblayers.a -> libgraphics.a`
+- Current MetaMake source-list parsing finding:
+  - `%build_module files=` parsing must sanitize directory-marker tokens like `classes/` out of source file lists
+  - concrete case: `workbench/libs/muimaster/mmakefile.src` uses `CLASSFILES := $(foreach f, $(CLASSES), classes/$(f))`; the current parser was leaking bogus `classes/` entries into `MODULE_MMAKE_PARSED_FILES` on a clean tree
+  - the shared sanitizer now drops trailing-slash directory markers from `%build_module`, `%build_archspecific`, and `%rule_*` source basename lists before source resolution
+- Current clean-build verification state in `/tmp/aros-clean-build-reuse`:
+  - with `-G Ninja`, `AROS_CROSSTOOLS_NATIVE=OFF`, and a reused working toolchain install, the fresh clean tree now builds:
+    - `aros-rom-graphics-native`
+    - `aros-rom-utility-native`
+  - that clean tree also now gets through the broad native interface graph for ROM/workbench dependencies without the earlier failures on:
+    - missing `oop/oop.h`
+    - missing `hidd/compositor.h`
+    - archive dependency cycles through `libgraphics.a`
+    - bogus `classes/` source entries from `muimaster`
 - Current native include-staging finding:
   - the flat native include root must mirror the legacy SDK header surface, not just copy trees opportunistically
   - a concrete failure was `native-includes/stdio.h` incorrectly resolving to `dos/stdio.h`, which broke `udis86` consumers because `FILE` was not defined
