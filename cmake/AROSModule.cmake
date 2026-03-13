@@ -956,37 +956,41 @@ function(_aros_collect_registered_archive_dependencies out_files_var out_targets
     if(NOT _registered_output AND _lib_name MATCHES "^(.+)_rel$")
       _aros_sanitize_property_key("${CMAKE_MATCH_1}" _aros_module_name_key)
       get_property(
-        _registered_target
+        _registered_interface_target
         GLOBAL
         PROPERTY "AROS_MODULE_NAME_INTERFACE_TARGET_${_aros_module_name_key}"
       )
-      if(_registered_target AND TARGET "${_registered_target}")
+      if(_registered_interface_target AND TARGET "${_registered_interface_target}")
         get_target_property(
           _registered_output
-          "${_registered_target}"
+          "${_registered_interface_target}"
           AROS_MODULE_REL_LINKLIB_OUTPUT
         )
         if(_registered_output STREQUAL "AROS_MODULE_REL_LINKLIB_OUTPUT-NOTFOUND")
           set(_registered_output "")
         endif()
+        set(_registered_target "${_registered_interface_target}")
+        set(_registered_output "")
       endif()
     endif()
 
     if(NOT _registered_output)
       get_property(
-        _registered_target
+        _registered_interface_target
         GLOBAL
         PROPERTY "AROS_MODULE_NAME_INTERFACE_TARGET_${_aros_lib_key}"
       )
-      if(_registered_target AND TARGET "${_registered_target}")
+      if(_registered_interface_target AND TARGET "${_registered_interface_target}")
         get_target_property(
           _registered_output
-          "${_registered_target}"
+          "${_registered_interface_target}"
           AROS_MODULE_PUBLIC_LINKLIB_OUTPUT
         )
         if(_registered_output STREQUAL "AROS_MODULE_PUBLIC_LINKLIB_OUTPUT-NOTFOUND")
           set(_registered_output "")
         endif()
+        set(_registered_target "${_registered_interface_target}")
+        set(_registered_output "")
       endif()
     endif()
 
@@ -2266,6 +2270,7 @@ function(aros_register_genmodule_module target_name)
   )
   set(_aros_module_runtime_build_target_deps ${_aros_module_runtime_build_deps})
   list(APPEND _aros_module_runtime_build_target_deps ${_aros_module_interface_dep_targets})
+  list(APPEND _aros_module_runtime_build_target_deps ${_aros_module_archive_dep_targets})
   list(REMOVE_DUPLICATES _aros_module_runtime_build_target_deps)
 
   add_custom_command(

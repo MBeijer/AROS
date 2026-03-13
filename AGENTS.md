@@ -503,3 +503,28 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - serialized Ninja verification (`-j1`)
     - or rerunning the final generated module `cmake -P ... build_genmodule_module.cmake` command directly for the specific module being checked
   - avoid reading too much into the wall-clock time there; the important signal is the regenerated command line and final artifact parity, not the slow NFS-bound custom-command churn
+- Current `hostlib.resource` migration finding:
+  - `arch/all-hosted/hostlib` is already registered natively and exposes the public artifact target `hostlib.resource`
+  - the clean-tree blocker was not legacy behavior; it was CMake graph modeling
+  - module-generated public/`_rel` linklib side effects must not be modeled as hard file prerequisites in Ninja
+    - real `aros_register_mmake_linklib(...)` archives can stay as file deps
+    - genmodule module public/`_rel` linklibs must be ordered through their interface targets instead
+    - runtime module deps now include `_aros_module_archive_dep_targets`
+  - after that fix, the clean-tree `hostlib.resource` edge no longer pulls false file deps like `libdiskfont.a`, `libasl.a`, `libmuimaster.a`, etc.; only the true core linklib archives remain as direct file prerequisites
+  - the next blocker was another shared CMake issue:
+    - base sources under `arch/...` were being misclassified as layer sources purely because their absolute path matched `/arch/`
+    - that stripped module `USER_INCLUDES` from base arch modules
+  - the generic rule now is:
+    - only treat a source as a layer source when it comes from a different resolved `arch/<layer>/...` directory than the module’s own `MODULE_PATH`
+    - base sources under `arch/...` keep full `_common_compile_args`
+  - legacy confirms the correct `hostlib` behavior:
+    - `close.o` is compiled from `arch/all-hosted/hostlib/close.c`
+    - `hostinterface.h` resolves from `arch/all-unix/kernel/hostinterface.h`
+    - see `cmake-build-debug/legacy-main/bin/linux-x86_64/gen/arch/all-hosted/hostlib/hostlib/close.d`
+  - a direct rerun of `cmake/build_genmodule_module.cmake` for `arch/all-hosted/hostlib` in `/tmp/aros-clean-build-reuse` now succeeds after the source-classification fix
+  - current `hostlib.resource` parity status:
+    - native: `/tmp/aros-clean-build-reuse/bin/linux-x86_64/AROS/boot/linux/Devs/hostlib.resource`
+    - legacy: `/tmp/aros-legacy-reference-linux-x86_64/bin/linux-x86_64/AROS/boot/linux/Devs/hostlib.resource`
+    - sizes match exactly: `14688`
+    - `cmp -l | wc -l` reports `1443` byte diffs
+    - the `$VER:` string is at the same offset (`4448`) and differs by date (`13.3.2026` vs `10.3.2026`), but the remaining diff count means this one is not yet proven to be date-only drift
