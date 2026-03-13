@@ -2358,6 +2358,7 @@ function(aros_register_genmodule_module target_name)
     _aros_module_archive_dep_targets
     ${_aros_module_archive_dep_names}
   )
+  _aros_encode_list("${_aros_module_archive_dep_files}" _aros_module_archive_dep_files_encoded)
   _aros_collect_interface_dependency_artifacts(
     _aros_module_interface_dep_files
     _aros_module_interface_dep_targets
@@ -2535,6 +2536,7 @@ function(aros_register_genmodule_module target_name)
             -DMODULE_LINK_OPTIONS=${_aros_module_link_options}
             -DMODULE_LINK_LIBS=${_aros_module_link_libs}
             -DMODULE_AUTO_LINK_LIBS=${_aros_module_auto_link_libs}
+            -DMODULE_EXPECTED_ARCHIVE_DEPS=${_aros_module_archive_dep_files_encoded}
             -P "${CMAKE_SOURCE_DIR}/cmake/build_genmodule_module.cmake"
     DEPENDS
       ${_aros_module_runtime_build_target_deps}

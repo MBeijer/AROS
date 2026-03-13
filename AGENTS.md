@@ -574,3 +574,51 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - concrete failure: `rom/lddemon` can pick `native-includes/lddemon.h` instead of `rom/lddemon/lddemon.h`, leaving `struct IntLDDemonBase` incomplete in generated `lddemon_start.c`
   - after shared `AROSModule.cmake` changes, even `/tmp` Ninja build dirs can spend a long time rewriting interface-only `cmake -P` steps because the source tree itself lives on NFS
     - treat that as a verification/performance caveat, not automatically as a new dependency bug
+- Current `kernel-package-base` / parity findings on the active `cmake-build-debug` tree:
+  - `cmake --build cmake-build-debug --target kernel-package-base -j 6` completes successfully in the current workspace
+  - a coarse whole-tree compare against `/tmp/aros-legacy-reference-linux-x86_64/bin/linux-x86_64/AROS` is mostly a coverage signal right now, not a single parity bug:
+    - native tree had `69` files vs legacy `2674`
+    - most "missing left" results are simply not-yet-migrated outputs
+    - current "missing right" examples like `gadtools.library`, `partition.library`, `libamigaguide.a`, `libuuid.a`, etc. are still legacy-reference coverage gaps
+  - after a direct rebuild of `rom/expansion` from the generated module command, `expansion.library` jumps from the stale `15224`-byte artifact back to the correct legacy-sized `20848` bytes
+    - that confirms the earlier large `expansion.library` mismatch in `cmake-build-debug` can come from stale module outputs, not only live graph regressions
+    - after the fresh rebuild, native `expansion.library` and legacy now both contain the expected error-requester/autoinit tail:
+      - `__aros_libreq_IntuitionBase.36`
+      - `__forceerrorrequester`
+      - `GetDataStreamFromFormat`
+      - `___showerror`
+    - there is still a remaining non-date byte diff (`cmp -l | wc -l` reported `2008`), so parity is improved but not yet finished
+  - `rom/hidds/input` currently emits a non-fatal warning in native builds:
+    - `HWAttrBase` is redefined between generated private SDK header `.../interface/HW.h` and `rom/hidds/input/input.h`
+    - current status is warning-only; not a hard migration blocker yet
+  - direct module-command rebuilds are useful for parity spot checks, but only when the module-local generated prerequisites are still present
+    - after interrupting a broader clean rebuild, running the raw generated `rom/dos` module command directly failed in `displayerror.c` because `MSG_STRING_*` defines were missing
+    - that was due to bypassing the normal generated local string-header dependency path, not a new proven `dos` graph regression
+  - direct raw runtime reruns of `cmake/build_genmodule_module.cmake` can also silently contaminate parity if the expected native archive deps are missing
+    - concrete case: a manual `rom/expansion` rerun in `cmake-build-debug` produced a false `2007`-byte drift against the clean native tree because native `libautoinit.a`, `liblibinit.a`, and `libstdc.static.a` were absent from `bin/.../AROS/Development/lib`, so the link fell back to sysroot/legacy archives
+    - the generic hardening fix is now in place:
+      - `AROSModule.cmake` passes the expected native archive file deps into the runtime module command
+      - `build_genmodule_module.cmake` now hard-fails if those archives are missing instead of silently accepting fallback resolution
+    - after restoring the active tree through the real Ninja target graph, `cmake-build-debug` `expansion.library` is byte-identical to the clean native `/tmp/aros-clean-build-reuse` artifact and back to the normal single-byte/date-only drift against the current legacy reference
+  - native archive parity has two separate classes:
+    - real content/member-name parity
+    - container-header metadata parity (`ar` member timestamps and related archive header bytes)
+  - the shared `build_mmake_linklib.cmake` object-base logic was producing path-heavy archive member names for some linklibs where legacy uses plain basenames when they are unique
+    - concrete failures:
+      - native `libstdc.static.a` stored members like `stdc_math_e_log.o`, while legacy stored `e_log.o`
+      - native `libudis86.a` stored members like `_home_..._itab.o`, while legacy stored `itab.o`
+    - the generic fix is now in place:
+      - `build_mmake_linklib.cmake` prefers the resolved source basename for archive member/object names when that basename is unique within the linklib
+      - it falls back to the old sanitized path-based name only on basename collisions
+    - after rebuilding `libstdc.static.a` and `libudis86.a`, both now match legacy member names and archive sizes exactly
+  - normalized archive-content parity is currently clean for the active native SDK libs:
+    - extracting all currently produced `Development/lib/*.a` files with `ar x` and comparing member contents against the legacy reference yields `0` real content diffs across `29` comparable archives
+    - remaining raw byte diffs in those `.a` files are just archive-container metadata (member timestamps/header bytes), not differing object contents
+  - `compare_output_trees.cmake` now treats `.a` archives specially:
+    - it compares member list/order plus extracted member contents instead of raw file size/SHA only
+    - this removes false parity failures from archive-header metadata while still catching real archive-content drift
+  - with that archive normalization in place, the current non-fatal active-tree compare reports only one differing comparable output:
+    - `boot/linux/Libs/expansion.library`
+    - current diff count is `1`, and it is the expected `$VER:` date-only drift:
+      - native: `$VER: expansion.library 41.4 (13.3.2026)`
+      - legacy: `$VER: expansion.library 41.4 (10.3.2026)`

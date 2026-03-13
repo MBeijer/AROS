@@ -701,6 +701,16 @@ function(_aros_make_object_base logical_name resolved_source out_var)
   set(${out_var} "${_object_base}" PARENT_SCOPE)
 endfunction()
 
+function(_aros_count_list_occurrences list_var needle out_var)
+  set(_count 0)
+  foreach(_value IN LISTS ${list_var})
+    if(_value STREQUAL "${needle}")
+      math(EXPR _count "${_count} + 1")
+    endif()
+  endforeach()
+  set(${out_var} "${_count}" PARENT_SCOPE)
+endfunction()
+
 _aros_parse_mmake_linklib("${LINKLIB_MMAKEFILE}")
 _aros_read_config_tokens("TARGET_CPPFLAGS" _linklib_default_cppflags)
 _aros_read_config_tokens("TARGET_ISA_CFLAGS" _linklib_target_isa_cflags)
@@ -825,7 +835,15 @@ foreach(_sdk IN LISTS LINKLIB_PARSED_USESDKS)
   list(APPEND _common_compile_args "-I${AROS_NATIVE_BUILD_SDKS_DIR}/${_sdk}/include")
 endforeach()
 
-set(_linklib_objects)
+set(_linklib_asm_compile_args ${_common_compile_args})
+list(APPEND _linklib_asm_compile_args ${LINKLIB_PARSED_USER_AFLAGS})
+if(DEFINED LINKLIB_PARSED_AFLAGS AND NOT "${LINKLIB_PARSED_AFLAGS}" STREQUAL "")
+  list(APPEND _linklib_asm_compile_args ${LINKLIB_PARSED_AFLAGS})
+endif()
+_aros_remove_empty_entries(_linklib_asm_compile_args)
+
+set(_linklib_compile_specs)
+set(_linklib_preferred_member_bases)
 foreach(_linklib_file IN LISTS LINKLIB_PARSED_FILES)
   if(_linklib_file STREQUAL "")
     continue()
@@ -834,24 +852,10 @@ foreach(_linklib_file IN LISTS LINKLIB_PARSED_FILES)
   if(NOT _resolved_source)
     message(FATAL_ERROR "Could not resolve linklib source '${_linklib_file}' under ${_linklib_source_dir}")
   endif()
-  _aros_make_object_base("${_linklib_file}" "${_resolved_source}" _obj_base)
-  set(_object "${LINKLIB_OBJ_DIR}/${_obj_base}.o")
-  execute_process(
-    COMMAND "${_linklib_cc}" ${_common_compile_args} -c "${_resolved_source}" -o "${_object}"
-    RESULT_VARIABLE _compile_result
-  )
-  if(NOT _compile_result EQUAL 0)
-    message(FATAL_ERROR "Failed compiling ${_resolved_source}")
-  endif()
-  list(APPEND _linklib_objects "${_object}")
+  get_filename_component(_preferred_base "${_resolved_source}" NAME_WE)
+  list(APPEND _linklib_compile_specs "c|${_linklib_file}|${_resolved_source}|${_preferred_base}")
+  list(APPEND _linklib_preferred_member_bases "${_preferred_base}")
 endforeach()
-
-set(_linklib_asm_compile_args ${_common_compile_args})
-list(APPEND _linklib_asm_compile_args ${LINKLIB_PARSED_USER_AFLAGS})
-if(DEFINED LINKLIB_PARSED_AFLAGS AND NOT "${LINKLIB_PARSED_AFLAGS}" STREQUAL "")
-  list(APPEND _linklib_asm_compile_args ${LINKLIB_PARSED_AFLAGS})
-endif()
-_aros_remove_empty_entries(_linklib_asm_compile_args)
 
 foreach(_linklib_asmfile IN LISTS LINKLIB_PARSED_ASMFILES)
   if(_linklib_asmfile STREQUAL "")
@@ -861,16 +865,42 @@ foreach(_linklib_asmfile IN LISTS LINKLIB_PARSED_ASMFILES)
   if(NOT _resolved_asm_source)
     message(FATAL_ERROR "Could not resolve linklib asm source '${_linklib_asmfile}' under ${_linklib_source_dir}")
   endif()
-  _aros_make_object_base("${_linklib_asmfile}" "${_resolved_asm_source}" _asm_obj_base)
-  set(_asm_object "${LINKLIB_OBJ_DIR}/${_asm_obj_base}.o")
-  execute_process(
-    COMMAND "${_linklib_cc}" -x assembler-with-cpp ${_linklib_asm_compile_args} -c "${_resolved_asm_source}" -o "${_asm_object}"
-    RESULT_VARIABLE _asm_compile_result
-  )
-  if(NOT _asm_compile_result EQUAL 0)
-    message(FATAL_ERROR "Failed compiling ${_resolved_asm_source}")
+  get_filename_component(_preferred_base "${_resolved_asm_source}" NAME_WE)
+  list(APPEND _linklib_compile_specs "asm|${_linklib_asmfile}|${_resolved_asm_source}|${_preferred_base}")
+  list(APPEND _linklib_preferred_member_bases "${_preferred_base}")
+endforeach()
+
+set(_linklib_objects)
+foreach(_linklib_compile_spec IN LISTS _linklib_compile_specs)
+  string(REPLACE "|" ";" _linklib_compile_parts "${_linklib_compile_spec}")
+  list(GET _linklib_compile_parts 0 _linklib_kind)
+  list(GET _linklib_compile_parts 1 _linklib_logical_name)
+  list(GET _linklib_compile_parts 2 _linklib_resolved_source)
+  list(GET _linklib_compile_parts 3 _linklib_preferred_base)
+
+  _aros_count_list_occurrences(_linklib_preferred_member_bases "${_linklib_preferred_base}" _preferred_base_count)
+  if(_preferred_base_count EQUAL 1)
+    set(_obj_base "${_linklib_preferred_base}")
+  else()
+    _aros_make_object_base("${_linklib_logical_name}" "${_linklib_resolved_source}" _obj_base)
   endif()
-  list(APPEND _linklib_objects "${_asm_object}")
+
+  set(_object "${LINKLIB_OBJ_DIR}/${_obj_base}.o")
+  if(_linklib_kind STREQUAL "asm")
+    execute_process(
+      COMMAND "${_linklib_cc}" -x assembler-with-cpp ${_linklib_asm_compile_args} -c "${_linklib_resolved_source}" -o "${_object}"
+      RESULT_VARIABLE _compile_result
+    )
+  else()
+    execute_process(
+      COMMAND "${_linklib_cc}" ${_common_compile_args} -c "${_linklib_resolved_source}" -o "${_object}"
+      RESULT_VARIABLE _compile_result
+    )
+  endif()
+  if(NOT _compile_result EQUAL 0)
+    message(FATAL_ERROR "Failed compiling ${_linklib_resolved_source}")
+  endif()
+  list(APPEND _linklib_objects "${_object}")
 endforeach()
 
 list(APPEND _linklib_objects ${LINKLIB_PARSED_EXTRA_OBJECTS})

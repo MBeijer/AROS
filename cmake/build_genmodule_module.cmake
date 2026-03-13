@@ -1868,6 +1868,7 @@ _aros_decode_list(MODULE_COMPILE_OPTIONS)
 _aros_decode_list(MODULE_LINK_OPTIONS)
 _aros_decode_list(MODULE_LINK_LIBS)
 _aros_decode_list(MODULE_AUTO_LINK_LIBS)
+_aros_decode_list(MODULE_EXPECTED_ARCHIVE_DEPS)
 _aros_remove_empty_entries(MODULE_INCLUDE_DIRS)
 if(DEFINED AROS_NATIVE_INCLUDE_DIR AND NOT AROS_NATIVE_INCLUDE_DIR STREQUAL "")
   # The flat public include root is appended later on purpose. If it stays in
@@ -1880,6 +1881,7 @@ _aros_remove_empty_entries(MODULE_COMPILE_OPTIONS)
 _aros_remove_empty_entries(MODULE_LINK_OPTIONS)
 _aros_remove_empty_entries(MODULE_LINK_LIBS)
 _aros_remove_empty_entries(MODULE_AUTO_LINK_LIBS)
+_aros_remove_empty_entries(MODULE_EXPECTED_ARCHIVE_DEPS)
 _aros_read_config_tokens("CONFIG_CPPFLAGS" _module_config_cppflags)
 _aros_read_config_tokens("CONFIG_AFLAGS" _module_config_aflags)
 _aros_read_config_tokens("TARGET_ISA_CFLAGS" _module_target_isa_cflags)
@@ -2459,6 +2461,21 @@ if(DEFINED INTERFACE_ONLY AND INTERFACE_ONLY)
   endif()
 
   return()
+endif()
+
+set(_module_missing_expected_archives)
+foreach(_expected_archive IN LISTS MODULE_EXPECTED_ARCHIVE_DEPS)
+  if(NOT EXISTS "${_expected_archive}")
+    list(APPEND _module_missing_expected_archives "${_expected_archive}")
+  endif()
+endforeach()
+if(_module_missing_expected_archives)
+  string(REPLACE ";" "\n  " _module_missing_expected_archives_formatted "${_module_missing_expected_archives}")
+  message(FATAL_ERROR
+    "Missing expected native archive dependencies for ${MODULE_PATH}:\n"
+    "  ${_module_missing_expected_archives_formatted}\n"
+    "Run the build through the generated Ninja/CMake target graph so these archives are staged first."
+  )
 endif()
 
 set(_module_start_objects)
