@@ -389,6 +389,13 @@ Hard rule: when a CMake design only solves one module and does not clearly gener
 Hard rule: keep `AGENTS.md` updated with new migration-relevant findings, blockers, and user guidance during the session.
 Hard rule: when the user provides information that changes build understanding or migration direction, record it in `AGENTS.md`.
 Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and use module `#MM ...-includes` relationships to drive reusable CMake `INTERFACE` dependency graphs.
+- Current IDE/target naming rule:
+  - any CMake target that launches the legacy MetaMake/GNU make pipeline must be named with a clear `mmake-` prefix
+  - native CMake targets keep their native names (`aros-*-native`, normal tool targets, etc.) so IDE target lists clearly separate native and legacy/wrapper entrypoints
+- Current clean-build/native-include staging finding:
+  - on a clean Ninja build directory, `AROS_TARGET_CC` may still be empty at CMake generate time even though the crosstools target will later provide the compiler
+  - native include staging must therefore resolve the target compiler at execution time from the toolchain dir/prefix instead of assuming the configure-time `AROS_TARGET_CC` value is already populated
+  - concrete case: CLion/Ninja clean builds were failing in `stage_native_includes.cmake` while generating `asm.h`; the shared fix is to pass toolchain dir/prefix and let the staging script find `${triplet}-gcc` itself
 - Current native include-staging finding:
   - the flat native include root must mirror the legacy SDK header surface, not just copy trees opportunistically
   - a concrete failure was `native-includes/stdio.h` incorrectly resolving to `dos/stdio.h`, which broke `udis86` consumers because `FILE` was not defined

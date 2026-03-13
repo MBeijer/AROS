@@ -362,6 +362,8 @@ add_custom_command(
           -DAROS_NATIVE_INCLUDE_DIR=${AROS_NATIVE_INCLUDE_DIR}
           -DAROS_HOST_CC=${CMAKE_C_COMPILER}
           -DAROS_TARGET_CC=${_aros_native_target_cc}
+          -DAROS_TARGET_TOOLCHAIN_DIR=${AROS_NATIVE_TOOLCHAIN_INSTALL_DIR}
+          -DAROS_TARGET_TOOLCHAIN_PREFIX=${AROS_CROSSTOOLS_TARGET_CPU}-aros
           -P "${CMAKE_SOURCE_DIR}/cmake/stage_native_includes.cmake"
   COMMAND "${CMAKE_COMMAND}" -E touch "${AROS_NATIVE_INCLUDES_STAMP}"
   DEPENDS
@@ -385,18 +387,32 @@ if(NOT AROS_ENABLE_LEGACY_PIPELINE)
   return()
 endif()
 
+function(_aros_get_legacy_wrapper_target_name logical_target_name out_var)
+  if("${logical_target_name}" MATCHES "^aros-(.+)$")
+    set(_legacy_target_name "mmake-${CMAKE_MATCH_1}")
+  else()
+    set(_legacy_target_name "mmake-${logical_target_name}")
+  endif()
+  set(${out_var} "${_legacy_target_name}" PARENT_SCOPE)
+endfunction()
+
 function(aros_register_legacy_make_target target_name make_target)
   set(_deps ${ARGN})
   list(APPEND _deps ${_aros_make_common_deps})
+  _aros_get_legacy_wrapper_target_name("${target_name}" _legacy_target_name)
   add_custom_target(
-    "${target_name}"
+    "${_legacy_target_name}"
     COMMAND "${CMAKE_COMMAND}" -E chdir "${AROS_LEGACY_BUILD_DIR}"
             "${_aros_make_program}" ${_aros_make_job_args} ${_aros_make_var_args} "${make_target}"
     DEPENDS aros-configure ${_deps}
-    COMMENT "Running make ${make_target}"
+    COMMENT "Running legacy mmake target ${make_target}"
     VERBATIM
   )
 endfunction()
+
+_aros_get_legacy_wrapper_target_name("aros-all" _aros_legacy_all_target)
+_aros_get_legacy_wrapper_target_name("aros-aros" _aros_legacy_aros_target)
+_aros_get_legacy_wrapper_target_name("aros-tools" _aros_legacy_tools_target)
 
 aros_register_legacy_make_target(aros-all all ${_aros_legacy_crosstools_dep})
 aros_register_legacy_make_target(aros-aros AROS ${_aros_legacy_crosstools_dep})
@@ -525,12 +541,12 @@ if(AROS_ENABLE_COEXIST_COMPARE)
               -DSTRICT_COMPARE=${AROS_COEXIST_STRICT_COMPARE}
               -DSPECS_TEXT=${_aros_compare_specs_text}
               -P "${CMAKE_SOURCE_DIR}/cmake/compare_legacy_cmake_tools.cmake"
-      DEPENDS aros-tools aros-tools-native
+      DEPENDS ${_aros_legacy_tools_target} aros-tools-native
       COMMENT "Comparing CMake and legacy tool outputs"
       VERBATIM
     )
   else()
-    add_custom_target(aros-coexist-compare DEPENDS aros-tools)
+    add_custom_target(aros-coexist-compare DEPENDS ${_aros_legacy_tools_target})
   endif()
 endif()
 
@@ -601,11 +617,11 @@ if(AROS_ENABLE_OUTPUT_PARITY_CHECK)
             -DRIGHT_DIR=${AROS_PARITY_REFERENCE_DIR}
             -DFAIL_ON_DIFF=${AROS_OUTPUT_PARITY_STRICT}
             -P "${CMAKE_SOURCE_DIR}/cmake/compare_output_trees.cmake"
-    DEPENDS aros-aros aros-legacy-reference-build
+    DEPENDS ${_aros_legacy_aros_target} aros-legacy-reference-build
     COMMENT "Comparing full AROS output tree against legacy reference"
     VERBATIM
   )
 endif()
 
-add_custom_target(aros-default ALL DEPENDS aros-all)
+add_custom_target(aros-default ALL DEPENDS ${_aros_legacy_all_target})
 # END LEGACY

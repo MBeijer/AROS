@@ -8,6 +8,53 @@ if(NOT DEFINED AROS_SOURCE_DIR
   message(FATAL_ERROR "Missing required native include staging parameters")
 endif()
 
+function(_aros_resolve_target_cc out_var)
+  if(AROS_TARGET_CC AND EXISTS "${AROS_TARGET_CC}")
+    set(${out_var} "${AROS_TARGET_CC}" PARENT_SCOPE)
+    return()
+  endif()
+
+  string(REPLACE "-" ";" _target_parts "${AROS_TARGET}")
+  list(LENGTH _target_parts _target_parts_len)
+  if(_target_parts_len GREATER 1)
+    list(GET _target_parts 1 _target_cpu)
+  else()
+    set(_target_cpu "")
+  endif()
+
+  set(_toolchain_prefix "")
+  if(DEFINED AROS_TARGET_TOOLCHAIN_PREFIX AND NOT AROS_TARGET_TOOLCHAIN_PREFIX STREQUAL "")
+    set(_toolchain_prefix "${AROS_TARGET_TOOLCHAIN_PREFIX}")
+  elseif(_target_cpu)
+    set(_toolchain_prefix "${_target_cpu}-aros")
+  endif()
+
+  set(_toolchain_dirs)
+  if(DEFINED AROS_TARGET_TOOLCHAIN_DIR AND NOT AROS_TARGET_TOOLCHAIN_DIR STREQUAL "")
+    list(APPEND _toolchain_dirs "${AROS_TARGET_TOOLCHAIN_DIR}")
+  endif()
+  list(APPEND _toolchain_dirs
+    "${AROS_CONFIG_BUILD_DIR}/bin/${AROS_TARGET}/tools/crosstools"
+    "${AROS_BINARY_DIR}/bin/${AROS_TARGET}/tools/crosstools"
+  )
+  list(REMOVE_DUPLICATES _toolchain_dirs)
+
+  if(_toolchain_prefix)
+    foreach(_toolchain_dir IN LISTS _toolchain_dirs)
+      foreach(_candidate IN ITEMS
+          "${_toolchain_dir}/bin/${_toolchain_prefix}-gcc"
+          "${_toolchain_dir}/${_toolchain_prefix}-gcc")
+        if(EXISTS "${_candidate}")
+          set(${out_var} "${_candidate}" PARENT_SCOPE)
+          return()
+        endif()
+      endforeach()
+    endforeach()
+  endif()
+
+  set(${out_var} "" PARENT_SCOPE)
+endfunction()
+
 function(_aros_copy_directory_contents src_dir dst_dir)
   if(NOT IS_DIRECTORY "${src_dir}")
     return()
@@ -322,8 +369,9 @@ function(_aros_generate_arch_asm_header)
   if(NOT EXISTS "${_asm_source}")
     return()
   endif()
-  if(NOT EXISTS "${AROS_TARGET_CC}")
-    message(FATAL_ERROR "Target compiler not found for asm.h generation: ${AROS_TARGET_CC}")
+  _aros_resolve_target_cc(_aros_target_cc)
+  if(NOT _aros_target_cc)
+    message(FATAL_ERROR "Target compiler not found for asm.h generation")
   endif()
 
   set(_asm_gen_root "${AROS_BINARY_DIR}/native-include-tools")
@@ -334,7 +382,7 @@ function(_aros_generate_arch_asm_header)
 
   execute_process(
     COMMAND
-      "${AROS_TARGET_CC}"
+      "${_aros_target_cc}"
       "-I${AROS_NATIVE_INCLUDE_DIR}"
       "-isystem" "${AROS_NATIVE_INCLUDE_DIR}/aros/posixc"
       "-isystem" "${AROS_NATIVE_INCLUDE_DIR}/aros/stdc"
