@@ -786,25 +786,64 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
       - both parser sites that skip comment logical lines now accept `^[ \t;]*#`, not only bare `^#`
     - local verification:
       - the same narrow `aros-workbench-libs-cgxvideo-native` rebuild now passes both earlier `compiler/crt` interface stops and reaches the final `cgxvideo` module build
-  - the next concrete parity defect in the newly added workbench batch is now `workbench/libs/uuid`
-    - build status:
-      - `uuid.library` is present under `bin/linux-x86_64/AROS/Libs`
-    - targeted parity result against the active legacy reference tree:
-      - size mismatch: native `30448`, legacy `25384`
-    - current binary-shape difference:
-      - native `uuid.library` contains direct stdlib-side implementations and data such as:
-        - `snprintf`
-        - `strlen`
-        - `vsnprintf`
-        - `__vcformat`
-        - `__ctype_*`
-      - legacy `uuid.library` instead carries `StdlibBase` libreq/wrapper symbols such as:
-        - `__aros_libreq_StdlibBase`
-        - `__snprintf_StdlibBase_libreq`
-        - `__strlen_StdlibBase_libreq`
-    - current leading hypothesis:
-      - the remaining drift is likely in shared native link behavior, not `workbench/libs/uuid/CMakeLists.txt`
-      - the main suspect is the native genmodule link command grouping all available auto-link libraries under `-Wl,--start-group/--end-group`, which can pull extra `stdlib`/`crt` members that the legacy `%build_module` link order does not
+  - the remaining parity drift in the newly added plain `workbench/libs` batch is mostly shared link-shape, not per-module manifest logic
+    - first concrete trigger was `workbench/libs/uuid`
+      - active-tree stale output before the fix:
+        - native `uuid.library` was `30448`, legacy `25384`
+        - native `uuid.library` pulled direct stdlib-side implementations and data such as:
+          - `snprintf`
+          - `strlen`
+          - `vsnprintf`
+          - `__vcformat`
+          - `__ctype_*`
+        - legacy `uuid.library` instead carried the `StdlibBase` libreq/wrapper path:
+          - `__aros_libreq_StdlibBase`
+          - `__snprintf_StdlibBase_libreq`
+          - `__strlen_StdlibBase_libreq`
+    - current linker-shape evidence:
+      - the generated native module commands for `uuid`, `identify`, `rexxsupport`, `kms`, `muiscreen`, and `reqtools` all pass:
+        - `MODULE_LINK_LIBS=` or a small explicit module-local set
+        - `MODULE_AUTO_LINK_LIBS=...|m|stdlib|crt|...|exec|autoinit|libinit`
+      - `TARGET_C_LIBS` in the active legacy config is empty, so the extra stdlib-side pull is not coming from `target.cfg`
+      - archive symbol scan on the active native SDK shows:
+        - `libstdlib.a` contains the wrapper/libreq path:
+          - `__snprintf_StdlibBase_libreq`
+          - `__strlen_StdlibBase_libreq`
+        - `libstdc.static.a` contains the full ctype tables:
+          - `__ctype_b`
+          - `__ctype_toupper`
+          - `__ctype_tolower`
+        - `libstdc.static.a` and `libstdlib.a` both contain:
+          - `snprintf`
+          - `vsnprintf`
+          - `__vcformat`
+    - negative experiment already run:
+      - a one-off relink of `uuid` with a temporary copy of `build_genmodule_module.cmake` that drops `--start-group/--end-group` does not work as a direct fix
+      - concrete failure:
+        - `/tmp/uuid.nogroup.library` fails to link with unresolved `GetDataStreamFromFormat`
+      - implication:
+        - the parity fix is not “remove all grouping”
+    - current generic fix:
+      - `cmake/build_genmodule_module.cmake` no longer wraps the entire effective native link set in one `--start-group/--end-group`
+      - only the startup/autolib cycle is grouped:
+        - `arossupport`
+        - `amiga`
+        - `exec`
+        - `autoinit`
+        - `libinit`
+      - other auto-link libraries such as `m`, `stdlib`, and `crt` now stay ungrouped, which matches the legacy `%build_module` pull behavior closely enough to avoid dragging in extra stdlib bodies
+    - local verification with isolated replays using the checked-in script:
+      - `uuid.library`: `25384` vs legacy `25384`, down to a `1`-byte drift class
+      - `identify.library`: `64920` vs legacy `64920`, down to a `1`-byte drift class
+      - `rexxsupport.library`: `44656` vs legacy `44656`, remaining same-size multi-byte drift
+      - `kms.library`: `20760` vs legacy `20760`, remaining same-size multi-byte drift
+      - `muiscreen.library`: `25504` vs legacy `25504`, down to a `1`-byte drift class
+      - `reqtools.library`: `172368` vs legacy `172368`, remaining same-size multi-byte drift
+    - active build-tree caveat:
+      - the checked-in shared fix is verified through isolated `/tmp` replays already
+      - the active `cmake-build-debug/bin/.../Libs` tree is still partly stale until those targets are rebuilt there:
+        - `identify.library` is currently missing from the active tree
+        - `uuid.library`, `rexxsupport.library`, `kms.library`, `muiscreen.library`, and `reqtools.library` still show their pre-fix sizes in the active tree
   - the native genmodule linker was missing the target compiler runtime helper archive under `-nostdlib`
     - concrete failure before the fix:
       - `workbench/libs/kms` linked with unresolved `__popcountdi2`
@@ -838,23 +877,24 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - `workbench/libs/CMakeLists.txt` default native module set and cache-upgrade logic were extended so existing default-valued `AROS_WORKBENCH_LIBS_NATIVE_MODULES` caches pick up that batch automatically
     - current direct native artifact presence under `bin/linux-x86_64/AROS/Libs`:
       - `camd.library`
-      - `identify.library`
       - `rexxsupport.library`
       - `kms.library`
       - `muiscreen.library`
       - `pccard.library`
       - `reqtools.library`
+      - `identify.library` is currently missing from the active tree, but an isolated replay with the checked-in genmodule script succeeds and matches legacy size
     - `reqtools` currently emits packed-member alignment warnings in a few files, but they are warning-only and not a migration blocker
     - targeted parity check against the active legacy reference tree:
       - parity-healthy `1`-byte drift class:
         - `camd.library`
         - `pccard.library`
-      - not parity-clean yet, with current size mismatches:
-        - `identify.library` (`72432` vs `64920`)
-        - `rexxsupport.library` (`50520` vs `44656`)
-        - `kms.library` (`20232` vs `20760`)
-        - `muiscreen.library` (`25120` vs `25504`)
-        - `reqtools.library` (`171944` vs `172368`)
+      - verified by isolated replay with the checked-in script, but not yet refreshed in the active tree:
+        - `identify.library` (`64920` vs `64920`, `1`-byte drift class)
+        - `uuid.library` (`25384` vs `25384`, `1`-byte drift class)
+        - `muiscreen.library` (`25504` vs `25504`, `1`-byte drift class)
+        - `rexxsupport.library` (`44656` vs `44656`, same-size multi-byte drift)
+        - `kms.library` (`20760` vs `20760`, same-size multi-byte drift)
+        - `reqtools.library` (`172368` vs `172368`, same-size multi-byte drift)
   - `aros-workbench-libs-complete-native` now gets past the former `cgxvideo` blocker
     - aggregate target verification reached successful native module builds for:
       - `amigaguide`
@@ -866,7 +906,7 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
       - `uuid`
     - implication:
       - the earlier `asl`/`coolimages` include-shadowing failure is no longer the aggregate blocker
-      - the next actionable workbench issue has shifted from build coverage to parity cleanup, with `uuid.library` as the next concrete mismatch
+      - the next actionable workbench issue has shifted from gross size-mismatch cleanup to refreshing the active tree under the checked-in selective-group linker logic and then reducing the remaining same-size drift class (`rexxsupport`, `kms`, `reqtools`)
   - targeted parity checks now need to be part of each migration increment, not a later cleanup pass
     - working rule for new native module batches:
       - after the build goes green, immediately compare each newly added artifact against the active legacy reference tree

@@ -2866,6 +2866,28 @@ _aros_debug_var(_module_compiler_runtime_libs)
 _aros_debug_var(_module_generated_entrypoint_flags)
 _aros_debug_var(_module_runtime_self_linklibs)
 
+# Keep the legacy-like startup/autolib cycle grouped, but leave the rest of
+# the auto-link chain ordered normally. Grouping every available library pulls
+# in extra stdlib/crt bodies and breaks parity for modules like uuid.library.
+set(_module_core_group_link_libs
+  arossupport
+  amiga
+  exec
+  autoinit
+  libinit
+)
+set(_module_grouped_link_libs)
+set(_module_ungrouped_link_libs)
+foreach(_effective_lib IN LISTS _module_effective_link_libs)
+  if(_effective_lib IN_LIST _module_core_group_link_libs)
+    list(APPEND _module_grouped_link_libs "${_effective_lib}")
+  else()
+    list(APPEND _module_ungrouped_link_libs "${_effective_lib}")
+  endif()
+endforeach()
+_aros_debug_var(_module_grouped_link_libs)
+_aros_debug_var(_module_ungrouped_link_libs)
+
 set(_link_command
   "${_module_cc}"
   "--sysroot=${AROS_SYSROOT}"
@@ -2882,16 +2904,19 @@ list(APPEND _link_command "-L${AROS_NATIVE_REL_LIB_DIR}")
 list(APPEND _link_command ${_module_layer_ldflags})
 list(APPEND _link_command ${MODULE_LINK_OPTIONS})
 list(APPEND _link_command ${_module_generated_entrypoint_flags})
-if(_module_effective_link_libs OR _module_target_c_libs OR _module_compiler_runtime_libs OR _module_runtime_self_linklibs)
+list(APPEND _link_command ${_module_runtime_self_linklibs})
+foreach(_lib IN LISTS _module_ungrouped_link_libs)
+  list(APPEND _link_command "-l${_lib}")
+endforeach()
+if(_module_grouped_link_libs OR _module_target_c_libs OR _module_compiler_runtime_libs)
   list(APPEND _link_command "-Wl,--start-group")
 endif()
-list(APPEND _link_command ${_module_runtime_self_linklibs})
-foreach(_lib IN LISTS _module_effective_link_libs)
+foreach(_lib IN LISTS _module_grouped_link_libs)
   list(APPEND _link_command "-l${_lib}")
 endforeach()
 list(APPEND _link_command ${_module_target_c_libs})
 list(APPEND _link_command ${_module_compiler_runtime_libs})
-if(_module_effective_link_libs OR _module_target_c_libs OR _module_compiler_runtime_libs OR _module_runtime_self_linklibs)
+if(_module_grouped_link_libs OR _module_target_c_libs OR _module_compiler_runtime_libs)
   list(APPEND _link_command "-Wl,--end-group")
 endif()
 _aros_debug_var(_link_command)
