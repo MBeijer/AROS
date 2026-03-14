@@ -687,6 +687,20 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
       - `native-includes/limits.h` is absent
       - `<limits.h>` resolves through `aros/posixc/limits.h`
       - `PATH_MAX` expands to `1024`
+  - native include staging must also honor compiler-owned `%copy_includes` headers, not only arch include mmakefiles
+    - concrete failure on a clean tree:
+      - `workbench/libs/coolimages` interface generation failed in generated `coolimages_regcall_stubs.c`
+      - staged `native-includes/libraries/coolimages.h` includes flat `<coolimages.h>`
+      - `native-includes/coolimages.h` was missing, so the compile died with `fatal error: coolimages.h: No such file or directory`
+    - root cause:
+      - `compiler/include/libraries/coolimages.h` is only half of the public surface
+      - the matching flat header actually comes from `compiler/coolimages/include/coolimages.h`
+      - `stage_native_includes.cmake` was staging `compiler/include` directly, but not replaying `%copy_includes` from `compiler/*/mmakefile.src`
+    - current generic fix:
+      - `stage_native_includes.cmake` now stages `%copy_includes` from `compiler/*/mmakefile.src` in addition to the existing arch include mmakefiles
+    - local verification after rebuilding `aros-native-includes`:
+      - `native-includes/coolimages.h` is now generated from `compiler/coolimages/include/coolimages.h`
+      - direct `aros-workbench-libs-coolimages-native` builds move past the old generated-stub missing-header failure and back into the broader dependency graph
   - the remaining registered native `workbench/libs` modules beyond `asl` are now mostly green on the active tree
     - successful direct native builds:
       - `lowlevel.library`
@@ -695,9 +709,25 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
       - `version.library`
       - `workbench.library`
       - `uuid.library`
+      - `mathffp.library`
+      - `mathieeedoubtrans.library`
     - current active-file presence check under `bin/linux-x86_64/AROS/Libs`:
-      - present: `lowlevel`, `realtime`, `rexxsyslib`, `uuid`, `version`, `workbench`
+      - present: `lowlevel`, `realtime`, `rexxsyslib`, `uuid`, `version`, `workbench`, `mathffp`, `mathieeedoubtrans`
       - missing: `cgxvideo`
+  - the native `workbench/libs` module set now also includes the first math-library batch
+    - newly registered native modules:
+      - `workbench/libs/mathffp`
+      - `workbench/libs/mathieeedoubbas`
+      - `workbench/libs/mathieeedoubtrans`
+      - `workbench/libs/mathieeesingbas`
+      - `workbench/libs/mathieeesingtrans`
+      - `workbench/libs/mathtrans`
+    - each now has a native `CMakeLists.txt` using `aros_register_mmake_genmodule_module(...)`
+    - `workbench/libs/CMakeLists.txt` default native module set and cache-upgrade logic were extended so existing default-valued `AROS_WORKBENCH_LIBS_NATIVE_MODULES` caches pick up that batch automatically
+    - first verification batch is green:
+      - `mathffp.library`
+      - `mathieeedoubtrans.library`
+    - that gives one simple math module and one transitive case (`mathieeedoubtrans` depends on `mathieeedoubbas`) without needing extra CMake glue
   - `workbench/libs/cgxvideo` and `workbench/libs/uuid` are now registered as native CMake genmodule libraries
     - new module manifests:
       - `workbench/libs/cgxvideo/CMakeLists.txt`
@@ -724,3 +754,73 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
       - the blocker is a legacy module/source convention mismatch that is not yet proven fixable from CMake glue alone without changing accepted source semantics
     - current reference caveat:
       - the active legacy parity tree does not currently contain `Libs/cgxvideo.library`, so there is still no artifact-level parity comparison for this module
+  - the native genmodule linker was missing the target compiler runtime helper archive under `-nostdlib`
+    - concrete failure before the fix:
+      - `workbench/libs/kms` linked with unresolved `__popcountdi2`
+      - source trigger is `parsekeymapseg.c` calling `__builtin_popcount(...)`
+    - legacy evidence:
+      - current legacy map files load `.../tools/crosstools/lib/gcc/x86_64-aros/10.5.0/libgcc.a`
+    - current generic fix:
+      - `cmake/build_genmodule_module.cmake` now queries the target compiler with `-print-libgcc-file-name`
+      - when the build uses `NOSTDLIB_LDFLAGS`, the resolved helper archive is appended to the module link command
+    - local verification after the fix:
+      - `kms.library` now links successfully
+      - the change held through a rerun of `aros-workbench-libs-complete-native`
+  - the full initial math-library batch is now green on the active tree
+    - successful direct native builds now include:
+      - `mathffp.library`
+      - `mathieeedoubbas.library`
+      - `mathieeedoubtrans.library`
+      - `mathieeesingbas.library`
+      - `mathieeesingtrans.library`
+      - `mathtrans.library`
+    - this extends the earlier first-pass result and shows both base and transitive math-library cases working without extra CMake glue
+  - additional plain `workbench/libs` genmodule libraries are now registered natively
+    - newly added module manifests:
+      - `workbench/libs/camd/CMakeLists.txt`
+      - `workbench/libs/identify/CMakeLists.txt`
+      - `workbench/libs/rexxsupport/CMakeLists.txt`
+      - `workbench/libs/kms/CMakeLists.txt`
+      - `workbench/libs/muiscreen/CMakeLists.txt`
+      - `workbench/libs/pccard/CMakeLists.txt`
+      - `workbench/libs/reqtools/CMakeLists.txt`
+    - `workbench/libs/CMakeLists.txt` default native module set and cache-upgrade logic were extended so existing default-valued `AROS_WORKBENCH_LIBS_NATIVE_MODULES` caches pick up that batch automatically
+    - current direct native artifact presence under `bin/linux-x86_64/AROS/Libs`:
+      - `camd.library`
+      - `identify.library`
+      - `rexxsupport.library`
+      - `kms.library`
+      - `muiscreen.library`
+      - `pccard.library`
+      - `reqtools.library`
+    - `reqtools` currently emits packed-member alignment warnings in a few files, but they are warning-only and not a migration blocker
+    - targeted parity check against the active legacy reference tree:
+      - parity-healthy `1`-byte drift class:
+        - `camd.library`
+        - `pccard.library`
+      - not parity-clean yet, with current size mismatches:
+        - `identify.library` (`72432` vs `64920`)
+        - `rexxsupport.library` (`50520` vs `44656`)
+        - `kms.library` (`20232` vs `20760`)
+        - `muiscreen.library` (`25120` vs `25504`)
+        - `reqtools.library` (`171944` vs `172368`)
+  - `aros-workbench-libs-complete-native` now gets cleanly back to the known `cgxvideo` blocker
+    - aggregate target verification reached successful native module builds for:
+      - `amigaguide`
+      - `asl`
+      - `bullet`
+      - `camd`
+      - `cgfx`
+    - implication:
+      - the earlier `asl`/`coolimages` include-shadowing failure is no longer the aggregate blocker
+      - the next actionable workbench blocker is still `cgxvideo`, with the same unresolved `OOPBase`, `__IHidd_Overlay`, and `__LIBS__symbol_set_handler_missing`
+  - targeted parity checks now need to be part of each migration increment, not a later cleanup pass
+    - working rule for new native module batches:
+      - after the build goes green, immediately compare each newly added artifact against the active legacy reference tree
+      - record each result in one of these buckets before moving on:
+        - no legacy reference artifact yet
+        - `1`-byte / date-version drift class
+        - same-size but multi-byte drift
+        - size mismatch
+    - current math-library batch parity classification:
+      - `mathffp.library`, `mathieeedoubbas.library`, `mathieeedoubtrans.library`, `mathieeesingbas.library`, `mathieeesingtrans.library`, and `mathtrans.library` are all currently in the `1`-byte drift class against the active legacy reference tree

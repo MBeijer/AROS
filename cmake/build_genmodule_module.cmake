@@ -2632,6 +2632,20 @@ _aros_remove_empty_entries(_module_nostartup_ldflags)
 _aros_remove_empty_entries(_module_nostdlib_ldflags)
 _aros_remove_empty_entries(_module_nostartup_objects)
 _aros_remove_empty_entries(_module_layer_ldflags)
+set(_module_compiler_runtime_libs)
+if(_module_nostdlib_ldflags)
+  execute_process(
+    COMMAND "${_module_cc}" -print-libgcc-file-name
+    RESULT_VARIABLE _module_libgcc_result
+    OUTPUT_VARIABLE _module_libgcc
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(_module_libgcc_result EQUAL 0 AND IS_ABSOLUTE "${_module_libgcc}" AND EXISTS "${_module_libgcc}")
+    list(APPEND _module_compiler_runtime_libs "${_module_libgcc}")
+  endif()
+endif()
+_aros_remove_empty_entries(_module_compiler_runtime_libs)
 _aros_collect_existing_public_linklibs(_module_available_auto_link_libs ${MODULE_AUTO_LINK_LIBS})
 set(_module_manual_link_libs)
 foreach(_manual_link_lib IN LISTS MODULE_LINK_LIBS)
@@ -2659,6 +2673,7 @@ _aros_debug_var(_module_link_objects)
 _aros_debug_var(_module_manual_link_libs)
 _aros_debug_var(_module_available_auto_link_libs)
 _aros_debug_var(_module_effective_link_libs)
+_aros_debug_var(_module_compiler_runtime_libs)
 
 set(_link_command
   "${_module_cc}"
@@ -2675,14 +2690,15 @@ list(APPEND _link_command "-L${AROS_NATIVE_PRIVATE_LIB_DIR}")
 list(APPEND _link_command "-L${AROS_NATIVE_REL_LIB_DIR}")
 list(APPEND _link_command ${_module_layer_ldflags})
 list(APPEND _link_command ${MODULE_LINK_OPTIONS})
-if(_module_effective_link_libs OR _module_target_c_libs)
+if(_module_effective_link_libs OR _module_target_c_libs OR _module_compiler_runtime_libs)
   list(APPEND _link_command "-Wl,--start-group")
 endif()
 foreach(_lib IN LISTS _module_effective_link_libs)
   list(APPEND _link_command "-l${_lib}")
 endforeach()
 list(APPEND _link_command ${_module_target_c_libs})
-if(_module_effective_link_libs OR _module_target_c_libs)
+list(APPEND _link_command ${_module_compiler_runtime_libs})
+if(_module_effective_link_libs OR _module_target_c_libs OR _module_compiler_runtime_libs)
   list(APPEND _link_command "-Wl,--end-group")
 endif()
 _aros_debug_var(_link_command)
