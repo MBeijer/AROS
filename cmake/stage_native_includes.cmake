@@ -501,6 +501,16 @@ _aros_publish_root_include_alias("dos/dos.h" "dos.h")
 # PATH_MAX from <aros/posixc/limits.h>.
 file(REMOVE "${AROS_NATIVE_INCLUDE_DIR}/limits.h")
 
+# The legacy SDK also does not publish these flat CRT-facing headers at the
+# include root. Keeping the staged stdc aliases here breaks compiler/crt by
+# shadowing the richer POSIXC variants needed for types like sigjmp_buf,
+# struct sigaction, and clockid_t.
+file(REMOVE
+  "${AROS_NATIVE_INCLUDE_DIR}/setjmp.h"
+  "${AROS_NATIVE_INCLUDE_DIR}/signal.h"
+  "${AROS_NATIVE_INCLUDE_DIR}/time.h"
+)
+
 _aros_generate_execbase_header()
 _aros_generate_arch_libcall_header()
 _aros_generate_arch_asm_header()

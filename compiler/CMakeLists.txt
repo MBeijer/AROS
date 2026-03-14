@@ -45,6 +45,11 @@ set(AROS_COMPILER_NATIVE_MODULE_AUTOLIBS "${AROS_COMPILER_NATIVE_MODULE_AUTOLIBS
   "Resolved AROS autolib chain mirrored by native genmodule-backed module links when archives are available" FORCE)
 
 add_custom_target(aros-core-linklibs-native)
+add_custom_target(aros-core-modules-native)
+
+# Staged AROS float.h exposes FLT_EVAL_METHOD only when ISO C visibility is enabled.
+# Legacy compiler/crt builds effectively compile with C99-visible libc headers.
+set(_aros_compiler_crt_visibility_defines "__ISO_C_VISIBLE=1999")
 
 foreach(_aros_compiler_linklib IN LISTS AROS_COMPILER_NATIVE_LINKLIBS)
   if(_aros_compiler_linklib STREQUAL "amiga")
@@ -86,3 +91,39 @@ foreach(_aros_compiler_linklib IN LISTS AROS_COMPILER_NATIVE_LINKLIBS)
     message(FATAL_ERROR "Unknown native compiler linklib entry: ${_aros_compiler_linklib}")
   endif()
 endforeach()
+
+aros_register_mmake_genmodule_module(
+  aros-compiler-m-native
+  MODULE_PATH compiler/crt
+  MODULE_NAME m
+  MODULE_TYPE library
+  MMAKEFILE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/crt/mmakefile.src"
+  MODULE_CONF "${CMAKE_CURRENT_SOURCE_DIR}/crt/m.conf"
+  MMAKE_NAME compiler-m
+  COMPILE_DEFINITIONS ${_aros_compiler_crt_visibility_defines}
+)
+add_dependencies(aros-core-modules-native aros-compiler-m-native)
+
+aros_register_mmake_genmodule_module(
+  aros-compiler-stdlib-native
+  MODULE_PATH compiler/crt
+  MODULE_NAME stdlib
+  MODULE_TYPE library
+  MMAKEFILE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/crt/mmakefile.src"
+  MODULE_CONF "${CMAKE_CURRENT_SOURCE_DIR}/crt/stdlib.conf"
+  MMAKE_NAME compiler-stdlib
+  COMPILE_DEFINITIONS ${_aros_compiler_crt_visibility_defines}
+)
+add_dependencies(aros-core-modules-native aros-compiler-stdlib-native)
+
+aros_register_mmake_genmodule_module(
+  aros-compiler-crt-native
+  MODULE_PATH compiler/crt
+  MODULE_NAME crt
+  MODULE_TYPE library
+  MMAKEFILE_SRC "${CMAKE_CURRENT_SOURCE_DIR}/crt/mmakefile.src"
+  MODULE_CONF "${CMAKE_CURRENT_SOURCE_DIR}/crt/crt.conf"
+  MMAKE_NAME compiler-crt
+  COMPILE_DEFINITIONS ${_aros_compiler_crt_visibility_defines}
+)
+add_dependencies(aros-core-modules-native aros-compiler-crt-native)

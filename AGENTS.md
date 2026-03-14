@@ -754,6 +754,26 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
       - the blocker is a legacy module/source convention mismatch that is not yet proven fixable from CMake glue alone without changing accepted source semantics
     - current reference caveat:
       - the active legacy parity tree does not currently contain `Libs/cgxvideo.library`, so there is still no artifact-level parity comparison for this module
+    - current CMake-side resolution path (2026-03-14):
+      - `aros_register_mmake_genmodule_module(...)` now accepts extra `LINK_LIBS` and `LINK_OPTIONS` so native module manifests can extend legacy-parsed metadata without dropping to a custom registration path
+      - `workbench/libs/cgxvideo/CMakeLists.txt` now injects `LINK_LIBS oop`
+      - object-level probing showed the HIDD overlay issue is not the macro `Hidd_OverlayAttrBase` itself but the generated token `__IHidd_Overlay`
+      - working CMake-side alias is therefore:
+        - `COMPILE_DEFINITIONS __IHidd_Overlay=HiddOverlayAttrBase`
+      - `cmake/build_genmodule_module.cmake` now also provides a weak `__LIBS__symbol_set_handler_missing` marker when:
+        - generated linklib sources pull in `__includelibrarieshandling`
+        - but the generated startup does not declare `THIS_PROGRAM_HANDLES_SYMBOLSET(LIBS)` / `DECLARESET(LIBS)`
+      - rationale:
+        - this matches the existing weak-marker fallback already used for missing `INIT` symbolset handlers
+        - it specifically covers `noautolib` genmodule startups like `cgxvideo`, where `*_autoinit.c` is still emitted but the startup omits the normal `LIBS` handler set
+      - manual verification:
+        - a direct target-compiler object/link probe succeeds once all three CMake-side pieces are applied:
+          - `oop` added to the link surface
+          - `__IHidd_Overlay=HiddOverlayAttrBase`
+          - weak `__LIBS__symbol_set_handler_missing`
+      - status:
+        - the checked-in CMake changes are in place
+        - a full narrow Ninja rebuild of `aros-workbench-libs-cgxvideo-native` is still pending completion on the NFS-backed tree, so this is not yet counted as a green native artifact
   - the native genmodule linker was missing the target compiler runtime helper archive under `-nostdlib`
     - concrete failure before the fix:
       - `workbench/libs/kms` linked with unresolved `__popcountdi2`

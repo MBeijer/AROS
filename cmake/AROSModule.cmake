@@ -1358,6 +1358,11 @@ function(_aros_collect_staged_copy_include_paths_from_mmake mmakefile_path modul
 endfunction()
 
 function(_aros_extract_mmake_build_module_metadata mmakefile_src module_path out_prefix)
+  set(_options)
+  set(_one_value_args
+    MMAKE_NAME
+  )
+  cmake_parse_arguments(AROS_BUILD_MODULE "${_options}" "${_one_value_args}" "" ${ARGN})
   _aros_read_mmake_logical_lines("${mmakefile_src}" _logical_lines)
 
   set(_module_name "")
@@ -1378,6 +1383,15 @@ function(_aros_extract_mmake_build_module_metadata mmakefile_src module_path out
     if(_line MATCHES "^%build_module[^ \t]*[ \t]+(.*)$")
       set(_arg_string "${CMAKE_MATCH_1}")
       separate_arguments(_tokens NATIVE_COMMAND "${_arg_string}")
+      set(_line_module_name "")
+      set(_line_module_type "")
+      set(_line_module_mmake "")
+      set(_line_module_conf "")
+      set(_line_module_suffix "")
+      set(_line_module_archspecific FALSE)
+      set(_line_module_sdk "public")
+      set(_line_module_link_libs)
+      set(_line_module_use_sdks)
       foreach(_token IN LISTS _tokens)
         if(NOT _token MATCHES "^([^=]+)=(.*)$")
           continue()
@@ -1387,29 +1401,42 @@ function(_aros_extract_mmake_build_module_metadata mmakefile_src module_path out
         _aros_expand_make_tokens("${_value}" _value)
         _aros_unwrap_strip_expression("${_value}" _value)
         if(_key STREQUAL "mmake")
-          set(_module_mmake "${_value}")
+          set(_line_module_mmake "${_value}")
         elseif(_key STREQUAL "modname")
-          set(_module_name "${_value}")
+          set(_line_module_name "${_value}")
         elseif(_key STREQUAL "modtype")
-          set(_module_type "${_value}")
+          set(_line_module_type "${_value}")
         elseif(_key STREQUAL "conffile")
-          set(_module_conf "${_value}")
+          set(_line_module_conf "${_value}")
         elseif(_key STREQUAL "modsuffix")
-          set(_module_suffix "${_value}")
+          set(_line_module_suffix "${_value}")
         elseif(_key STREQUAL "archspecific" AND _value STREQUAL "yes")
-          set(_module_archspecific TRUE)
+          set(_line_module_archspecific TRUE)
         elseif(_key STREQUAL "sdk")
-          set(_module_sdk "${_value}")
+          set(_line_module_sdk "${_value}")
         elseif(_key STREQUAL "uselibs")
-          separate_arguments(_module_link_libs NATIVE_COMMAND "${_value}")
-          _aros_remove_empty_entries(_module_link_libs)
-          _aros_remove_token_entries(_module_link_libs "\\")
+          separate_arguments(_line_module_link_libs NATIVE_COMMAND "${_value}")
+          _aros_remove_empty_entries(_line_module_link_libs)
+          _aros_remove_token_entries(_line_module_link_libs "\\")
         elseif(_key STREQUAL "usesdks")
-          separate_arguments(_module_use_sdks NATIVE_COMMAND "${_value}")
-          _aros_remove_empty_entries(_module_use_sdks)
-          _aros_remove_token_entries(_module_use_sdks "\\")
+          separate_arguments(_line_module_use_sdks NATIVE_COMMAND "${_value}")
+          _aros_remove_empty_entries(_line_module_use_sdks)
+          _aros_remove_token_entries(_line_module_use_sdks "\\")
         endif()
       endforeach()
+      if(AROS_BUILD_MODULE_MMAKE_NAME
+         AND NOT _line_module_mmake STREQUAL "${AROS_BUILD_MODULE_MMAKE_NAME}")
+        continue()
+      endif()
+      set(_module_name "${_line_module_name}")
+      set(_module_type "${_line_module_type}")
+      set(_module_mmake "${_line_module_mmake}")
+      set(_module_conf "${_line_module_conf}")
+      set(_module_suffix "${_line_module_suffix}")
+      set(_module_archspecific "${_line_module_archspecific}")
+      set(_module_sdk "${_line_module_sdk}")
+      set(_module_link_libs ${_line_module_link_libs})
+      set(_module_use_sdks ${_line_module_use_sdks})
       break()
     endif()
   endforeach()
@@ -2145,7 +2172,10 @@ function(aros_register_genmodule_module target_name)
   endif()
 
   string(REPLACE "/" "_" _aros_module_id "${AROS_MODULE_MODULE_PATH}")
-  _aros_sanitize_property_key("${AROS_MODULE_MODULE_PATH}" _aros_module_property_key)
+  set(_aros_module_registration_key
+    "${AROS_MODULE_MODULE_PATH}:${AROS_MODULE_MODULE_NAME}:${AROS_MODULE_MODULE_TYPE}"
+  )
+  _aros_sanitize_property_key("${_aros_module_registration_key}" _aros_module_property_key)
   set(_aros_module_work_dir "${CMAKE_BINARY_DIR}/modules/${_aros_module_id}")
   set(_aros_module_generated_dir "${_aros_module_work_dir}/genmodule")
   set(_aros_module_obj_dir "${_aros_module_work_dir}/obj")
@@ -2634,12 +2664,20 @@ function(aros_register_mmake_genmodule_module target_name)
   set(_options)
   set(_one_value_args
     MODULE_PATH
+    MODULE_NAME
+    MODULE_TYPE
+    MODULE_SDK
     MMAKEFILE_SRC
     MODULE_CONF
+    MMAKE_NAME
   )
   set(_multi_value_args
+    COMPILE_DEFINITIONS
+    COMPILE_OPTIONS
     DEPENDS
     LAYER_EXCLUSIONS
+    LINK_LIBS
+    LINK_OPTIONS
   )
   cmake_parse_arguments(AROS_MMAKE "${_options}" "${_one_value_args}" "${_multi_value_args}" ${ARGN})
 
@@ -2653,8 +2691,27 @@ function(aros_register_mmake_genmodule_module target_name)
     set(_aros_mmakefile_src "${CMAKE_SOURCE_DIR}/${AROS_MMAKE_MODULE_PATH}/mmakefile.src")
   endif()
 
-  _aros_extract_mmake_build_module_metadata("${_aros_mmakefile_src}" "${AROS_MMAKE_MODULE_PATH}" _aros_mmake)
-  _aros_extract_conf_rellibs("${_aros_mmake_MODULE_CONF}" _aros_mmake_CONF_RELLIBS)
+  _aros_extract_mmake_build_module_metadata(
+    "${_aros_mmakefile_src}"
+    "${AROS_MMAKE_MODULE_PATH}"
+    _aros_mmake
+    MMAKE_NAME "${AROS_MMAKE_MMAKE_NAME}"
+  )
+  if(AROS_MMAKE_MODULE_NAME)
+    set(_aros_mmake_MODULE_NAME "${AROS_MMAKE_MODULE_NAME}")
+  endif()
+  if(AROS_MMAKE_MODULE_TYPE)
+    set(_aros_mmake_MODULE_TYPE "${AROS_MMAKE_MODULE_TYPE}")
+  endif()
+  if(AROS_MMAKE_MODULE_SDK)
+    set(_aros_mmake_MODULE_SDK "${AROS_MMAKE_MODULE_SDK}")
+  endif()
+  if(AROS_MMAKE_MODULE_CONF)
+    set(_aros_mmake_effective_conf_for_rellibs "${AROS_MMAKE_MODULE_CONF}")
+  else()
+    set(_aros_mmake_effective_conf_for_rellibs "${_aros_mmake_MODULE_CONF}")
+  endif()
+  _aros_extract_conf_rellibs("${_aros_mmake_effective_conf_for_rellibs}" _aros_mmake_CONF_RELLIBS)
   _aros_extract_mmake_include_interface_metadata(
     "${_aros_mmakefile_src}"
     "${_aros_mmake_MODULE_NAME}"
@@ -2729,6 +2786,10 @@ function(aros_register_mmake_genmodule_module target_name)
     SOURCE_INCLUDE_PATHS ${_aros_module_source_include_paths}
     STAGED_INCLUDE_PATHS ${_aros_module_staged_include_paths}
     INCLUDE_DIRS ${_aros_module_extra_include_dirs}
+    COMPILE_DEFINITIONS ${AROS_MMAKE_COMPILE_DEFINITIONS}
+    COMPILE_OPTIONS ${AROS_MMAKE_COMPILE_OPTIONS}
+    LINK_OPTIONS ${AROS_MMAKE_LINK_OPTIONS}
+    LINK_LIBS ${AROS_MMAKE_LINK_LIBS}
     LINK_LIBS ${_aros_mmake_MODULE_LINK_LIBS} ${_aros_mmake_CONF_RELLIBS}
     INTERFACE_NAMES ${_aros_mmake_INTERFACE_NAMES}
     INTERFACE_DEPENDS ${_aros_mmake_INTERFACE_DEPENDS}

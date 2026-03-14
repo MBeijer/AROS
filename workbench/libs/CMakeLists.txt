@@ -93,6 +93,13 @@ if(AROS_WORKBENCH_LIBS_NATIVE_MODULES STREQUAL "${_aros_workbench_libs_native_mo
   )
 endif()
 foreach(_aros_wb_lib_native_module IN LISTS AROS_WORKBENCH_LIBS_NATIVE_MODULES)
+  # Legacy workbench/libs module links resolve through the shared library
+  # surface (mui, m, stdlib, crt, ...), unlike many ROM-native modules that
+  # intentionally link against stdc.static directly.
+  set(AROS_COMPILER_NATIVE_MODULE_LINKLIBS "")
+  set(AROS_COMPILER_NATIVE_MODULE_AUTOLIBS
+    "mui;arossupport;amiga;m;stdlib;crt;codesets;keymap;expansion;commodities;diskfont;asl;muimaster;datatypes;cybergraphics;workbench;icon;intuition;gadtools;layers;aros;partition;iffparse;graphics;locale;dos;utility;exec;autoinit;libinit"
+  )
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_aros_wb_lib_native_module}/CMakeLists.txt")
     add_subdirectory("${_aros_wb_lib_native_module}")
   endif()
