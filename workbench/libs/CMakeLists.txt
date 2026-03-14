@@ -50,6 +50,22 @@ foreach(_aros_wb_lib_native_module IN LISTS AROS_WORKBENCH_LIBS_NATIVE_MODULES)
   endif()
 endforeach()
 
+set(_aros_workbench_libs_complete_native_deps)
+foreach(_aros_wb_lib_native_module IN LISTS AROS_WORKBENCH_LIBS_NATIVE_MODULES)
+  string(REPLACE "/" "-" _aros_wb_lib_target_id "${_aros_wb_lib_native_module}")
+  if(TARGET "aros-workbench-libs-${_aros_wb_lib_target_id}-native")
+    list(APPEND _aros_workbench_libs_complete_native_deps
+      "aros-workbench-libs-${_aros_wb_lib_target_id}-native"
+    )
+  endif()
+endforeach()
+
+add_custom_target(
+  aros-workbench-libs-complete-native
+  DEPENDS ${_aros_workbench_libs_complete_native_deps}
+)
+set_target_properties(aros-workbench-libs-complete-native PROPERTIES FOLDER "aros/workbench")
+
 file(GLOB _aros_workbench_libs_native_interface_mmakefiles
   RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
   "${CMAKE_CURRENT_SOURCE_DIR}/*/mmakefile.src"

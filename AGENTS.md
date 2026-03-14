@@ -622,3 +622,57 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - current diff count is `1`, and it is the expected `$VER:` date-only drift:
       - native: `$VER: expansion.library 41.4 (13.3.2026)`
       - legacy: `$VER: expansion.library 41.4 (10.3.2026)`
+  - after building the remaining currently migrated ROM modules outside `kernel-package-base` (`battclock`, `disk`, `exec`, `kernel`, `misc`, `partition`, `processor`, `timer`, `hidds/pci`) and then fixing `rom/task`, the active native tree now contains `76` files
+    - compare state against the current legacy reference:
+      - `missing right`: `18`
+      - `missing left`: `2616`
+      - `differing`: `28`
+    - the new `missing right` set is still mostly legacy-reference coverage gaps for artifacts the current reference tree does not contain:
+      - `Devs/task.resource`
+      - `Devs/disk.resource`
+      - `Devs/misc.resource`
+      - `Devs/Drivers/pci.hidd`
+      - `Libs/partition.library`
+      - `boot/linux/Devs/kernel.resource`
+      - `boot/linux/Libs/exec.library`
+      - plus already-known workbench-lib/archive coverage gaps
+  - current comparable runtime-output parity is now narrowly classified:
+    - `24` comparable runtime outputs differ by exactly `1` byte
+    - `Libs/aros.library` differs by `2` bytes
+    - `Libs/dos.library` differs by `381` bytes
+    - the larger raw `.a` diffs from ad-hoc `cmp` checks are archive-container metadata noise unless they also fail the archive-content compare path
+  - `Libs/aros.library` is down to the normal `$VER:` date drift class
+  - the remaining `Libs/dos.library` drift is still not a proven CMake-vs-legacy graph bug on this tree
+    - current strings still show divergent embedded repo identity and date metadata from `rom/dos/banner.c`
+    - native example: `Version Git 0dbb813549 (git@github.com:MBeijer/AROS.git)`
+    - legacy example: `Version Git fd5684ac62 (https://github.com/deadwood2/AROS)`
+  - `rom/task` is now native-buildable, but this required a source-side correctness fix rather than a CMake graph change
+    - `TASKRES_ENABLE` is always defined in `rom/task/task_intern.h`
+    - `GetParentTaskStorageSlot.c` and the public getter both call the internal helper `TaskGetStorageSlot(struct Task *, LONG)`
+    - the only implementation body in `rom/task/GetTaskStorageSlot.c` was compiled out under `#if 0`, leaving `task.resource` with a single unresolved symbol:
+      - `TaskGetStorageSlot`
+    - enabling that existing implementation is the minimal correct fix; there is no generic build-side substitute for it
+    - the current legacy reference tree still does not contain `Devs/task.resource`, so there is still no artifact-level parity compare for `task`
+  - the `rom/hidds/input` `HWAttrBase` warning is inherited from the generated source shape, not from the CMake-native compile command reconstruction
+    - native generated `inputclass_start.c` and legacy generated `inputclass_start.c` have the same include order:
+      - generated `inputclass_libdefs.h` includes `input.h`
+      - then generated `inputclass_start.c` includes `<hidd/hidd.h>`
+    - that means the warning is not currently a proven CMake-only regression
+  - `workbench/libs` now needs a native aggregate entrypoint, not only the legacy wrapper
+    - `workbench/libs/CMakeLists.txt` now exposes `aros-workbench-libs-complete-native` as the native aggregate over enabled `aros-workbench-libs-*-native` module targets
+    - this is the correct way to surface the next workbench migration blocker instead of hand-building a stale subset of libs
+  - the next concrete native workbench blocker is `workbench/libs/asl`
+    - failure:
+      - `buttonclass.c:82:47: error: 'struct CoolImage' has no member named 'numcolors'`
+    - root cause is include shadowing by the module’s own source directory, not a bad staged public header:
+      - `buttonclass.c` includes `<libraries/coolimages.h>`
+      - staged `libraries/coolimages.h` includes `<coolimages.h>`
+      - if the module source dir `workbench/libs/asl` is on the early `-I` path, that nested include resolves to the private legacy compatibility header `workbench/libs/asl/coolimages.h`
+      - that private header uses the old static layout field `depth` instead of the public/shared-layout field `numcolors`
+    - the generic runtime-builder fix is:
+      - strip the module’s own source dir from `MODULE_INCLUDE_DIRS`
+      - re-add `${AROS_SOURCE_DIR}/${MODULE_PATH}` as `-iquote` instead of `-I`
+      - this preserves local `"foo.h"` resolution but stops public `<foo.h>` includes from being shadowed by same-directory private headers
+    - preprocessor verification after the fix:
+      - with the `asl` include shape, `<libraries/coolimages.h>` now resolves nested `<coolimages.h>` to `native-includes/coolimages.h`, not `workbench/libs/asl/coolimages.h`
+    - full `aros-workbench-libs-asl-native` / `aros-workbench-libs-complete-native` rebuild verification remains slow on this NFS-backed tree because the changed runtime builder invalidates a broad interface slice before it gets back to the actual `asl` compile

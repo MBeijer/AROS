@@ -1870,6 +1870,8 @@ _aros_decode_list(MODULE_LINK_LIBS)
 _aros_decode_list(MODULE_AUTO_LINK_LIBS)
 _aros_decode_list(MODULE_EXPECTED_ARCHIVE_DEPS)
 _aros_remove_empty_entries(MODULE_INCLUDE_DIRS)
+set(_module_source_dir "${AROS_SOURCE_DIR}/${MODULE_PATH}")
+list(REMOVE_ITEM MODULE_INCLUDE_DIRS "${_module_source_dir}")
 if(DEFINED AROS_NATIVE_INCLUDE_DIR AND NOT AROS_NATIVE_INCLUDE_DIR STREQUAL "")
   # The flat public include root is appended later on purpose. If it stays in
   # MODULE_INCLUDE_DIRS, generated private sources can resolve public headers
@@ -2276,7 +2278,7 @@ endforeach()
 foreach(_include_dir IN LISTS MODULE_INCLUDE_DIRS)
   list(APPEND _common_compile_args "-I${_include_dir}")
 endforeach()
-list(APPEND _common_compile_args "-I${AROS_SOURCE_DIR}/${MODULE_PATH}")
+list(APPEND _common_compile_args "-iquote" "${_module_source_dir}")
 list(APPEND _common_compile_args ${_module_layer_includes})
 list(APPEND _common_compile_args ${_module_layer_cppflags})
 foreach(_define IN LISTS MODULE_COMPILE_DEFINITIONS)
@@ -2605,6 +2607,24 @@ _aros_remove_empty_entries(_module_start_objects)
 _aros_remove_empty_entries(_module_objects)
 _aros_remove_empty_entries(_module_end_objects)
 set(_module_link_objects ${_module_start_objects} ${_module_objects} ${_module_end_objects})
+if(NOT _module_generated_start_uses_autoinit)
+  # Hand-written noresident startup paths can still pull objects that use
+  # ADD2INIT() without linking the full init/exit runtime. Provide the marker
+  # symbol weakly so those modules link without forcing initexitsets.o in.
+  set(_module_init_symbol_marker_source "${MODULE_OBJ_DIR}/__init_symbolset_marker.c")
+  set(_module_init_symbol_marker_object "${MODULE_OBJ_DIR}/__init_symbolset_marker.o")
+  file(WRITE "${_module_init_symbol_marker_source}"
+    "int __INIT__symbol_set_handler_missing __attribute__((weak));\n"
+  )
+  execute_process(
+    COMMAND "${_module_cc}" ${_common_compile_args} -c "${_module_init_symbol_marker_source}" -o "${_module_init_symbol_marker_object}"
+    RESULT_VARIABLE _module_init_symbol_marker_compile_result
+  )
+  if(NOT _module_init_symbol_marker_compile_result EQUAL 0)
+    message(FATAL_ERROR "Failed compiling ${_module_init_symbol_marker_source}")
+  endif()
+  list(APPEND _module_link_objects "${_module_init_symbol_marker_object}")
+endif()
 _aros_remove_empty_entries(_module_link_objects)
 _aros_remove_empty_entries(_module_target_isa_ldflags)
 _aros_remove_empty_entries(_module_target_c_libs)
