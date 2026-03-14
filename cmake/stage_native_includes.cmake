@@ -464,6 +464,15 @@ foreach(_arch_include_mmake IN LISTS _arch_include_mmakefiles)
   _aros_stage_copy_includes_mmake("${_arch_include_mmake}")
 endforeach()
 
+# Stage compiler-owned public headers that are published through
+# %copy_includes in their local mmakefiles rather than through compiler/include.
+file(GLOB _compiler_include_mmakefiles
+  "${AROS_SOURCE_DIR}/compiler/*/mmakefile.src"
+)
+foreach(_compiler_include_mmake IN LISTS _compiler_include_mmakefiles)
+  _aros_stage_copy_includes_mmake("${_compiler_include_mmake}")
+endforeach()
+
 # Some active arch headers inherit support headers from other CPU namespaces
 # (for example x86_64 -> i386). Those are published by the generic *-all
 # include mmakefiles, so stage that namespaced support set as well.
