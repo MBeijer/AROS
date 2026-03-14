@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 # workbench/libs migration entrypoint.
 set(_aros_workbench_libs_native_modules_default
-  "amigaguide;asl;bullet;cgfx;commodities;coolimages;datatypes;diskfont;gadtools;icon;iffparse;locale;lowlevel;realtime;rexxsyslib;version;workbench"
+  "amigaguide;asl;bullet;cgfx;cgxvideo;commodities;coolimages;datatypes;diskfont;gadtools;icon;iffparse;locale;lowlevel;realtime;rexxsyslib;uuid;version;workbench"
 )
 set(
   AROS_WORKBENCH_LIBS_NATIVE_MODULES
@@ -16,6 +16,9 @@ set(_aros_workbench_libs_native_modules_previous_default
 )
 set(_aros_workbench_libs_native_modules_previous_default_v2
   "amigaguide;asl;bullet;cgfx;commodities;coolimages;datatypes;diskfont;gadtools;icon;iffparse;locale;lowlevel;realtime;rexxsyslib;workbench"
+)
+set(_aros_workbench_libs_native_modules_previous_default_v3
+  "amigaguide;asl;bullet;cgfx;commodities;coolimages;datatypes;diskfont;gadtools;icon;iffparse;locale;lowlevel;realtime;rexxsyslib;version;workbench"
 )
 if(AROS_WORKBENCH_LIBS_NATIVE_MODULES STREQUAL "${_aros_workbench_libs_native_modules_legacy_default}")
   set(
@@ -36,6 +39,15 @@ if(AROS_WORKBENCH_LIBS_NATIVE_MODULES STREQUAL "${_aros_workbench_libs_native_mo
   )
 endif()
 if(AROS_WORKBENCH_LIBS_NATIVE_MODULES STREQUAL "${_aros_workbench_libs_native_modules_previous_default_v2}")
+  set(
+    AROS_WORKBENCH_LIBS_NATIVE_MODULES
+    "${_aros_workbench_libs_native_modules_default}"
+    CACHE STRING
+    "Semicolon-separated workbench/libs modules enabled for native CMake migration"
+    FORCE
+  )
+endif()
+if(AROS_WORKBENCH_LIBS_NATIVE_MODULES STREQUAL "${_aros_workbench_libs_native_modules_previous_default_v3}")
   set(
     AROS_WORKBENCH_LIBS_NATIVE_MODULES
     "${_aros_workbench_libs_native_modules_default}"

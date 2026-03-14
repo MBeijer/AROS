@@ -622,13 +622,12 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - current diff count is `1`, and it is the expected `$VER:` date-only drift:
       - native: `$VER: expansion.library 41.4 (13.3.2026)`
       - legacy: `$VER: expansion.library 41.4 (10.3.2026)`
-  - after building the remaining currently migrated ROM modules outside `kernel-package-base` (`battclock`, `disk`, `exec`, `kernel`, `misc`, `partition`, `processor`, `timer`, `hidds/pci`) and then fixing `rom/task`, the active native tree now contains `76` files
+  - after building the remaining currently migrated ROM modules outside `kernel-package-base` (`battclock`, `disk`, `exec`, `kernel`, `misc`, `partition`, `processor`, `timer`, `hidds/pci`), the active accepted native tree is at the pre-`task` state
     - compare state against the current legacy reference:
-      - `missing right`: `18`
+      - `missing right`: `17`
       - `missing left`: `2616`
       - `differing`: `28`
     - the new `missing right` set is still mostly legacy-reference coverage gaps for artifacts the current reference tree does not contain:
-      - `Devs/task.resource`
       - `Devs/disk.resource`
       - `Devs/misc.resource`
       - `Devs/Drivers/pci.hidd`
@@ -646,12 +645,13 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - current strings still show divergent embedded repo identity and date metadata from `rom/dos/banner.c`
     - native example: `Version Git 0dbb813549 (git@github.com:MBeijer/AROS.git)`
     - legacy example: `Version Git fd5684ac62 (https://github.com/deadwood2/AROS)`
-  - `rom/task` is now native-buildable, but this required a source-side correctness fix rather than a CMake graph change
+  - `rom/task` remains blocked and must not be "fixed" by changing source as part of the migration
     - `TASKRES_ENABLE` is always defined in `rom/task/task_intern.h`
     - `GetParentTaskStorageSlot.c` and the public getter both call the internal helper `TaskGetStorageSlot(struct Task *, LONG)`
     - the only implementation body in `rom/task/GetTaskStorageSlot.c` was compiled out under `#if 0`, leaving `task.resource` with a single unresolved symbol:
       - `TaskGetStorageSlot`
-    - enabling that existing implementation is the minimal correct fix; there is no generic build-side substitute for it
+    - a prior source-side enablement of that body was the wrong move for this migration and must not be treated as accepted progress
+    - unless the user explicitly directs otherwise, `task` should stay outside the native-green set until it can be justified against a legacy reference path without changing source
     - the current legacy reference tree still does not contain `Devs/task.resource`, so there is still no artifact-level parity compare for `task`
   - the `rom/hidds/input` `HWAttrBase` warning is inherited from the generated source shape, not from the CMake-native compile command reconstruction
     - native generated `inputclass_start.c` and legacy generated `inputclass_start.c` have the same include order:
@@ -676,3 +676,51 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
     - preprocessor verification after the fix:
       - with the `asl` include shape, `<libraries/coolimages.h>` now resolves nested `<coolimages.h>` to `native-includes/coolimages.h`, not `workbench/libs/asl/coolimages.h`
     - full `aros-workbench-libs-asl-native` / `aros-workbench-libs-complete-native` rebuild verification remains slow on this NFS-backed tree because the changed runtime builder invalidates a broad interface slice before it gets back to the actual `asl` compile
+  - the staged flat public root must not publish `limits.h`
+    - `stage_native_includes.cmake` was creating `native-includes/limits.h` as a flat alias to `aros/stdc/limits.h`
+    - that header does not provide `PATH_MAX`, while the correct public path for current native module builds is `aros/posixc/limits.h`
+    - concrete native failure before the fix:
+      - `workbench/libs/locale/initlocale.c`: `PATH_MAX` undeclared
+    - current generic fix:
+      - after publishing flat root aliases, explicitly remove `${AROS_NATIVE_INCLUDE_DIR}/limits.h`
+    - verification after rebuilding `aros-native-includes`:
+      - `native-includes/limits.h` is absent
+      - `<limits.h>` resolves through `aros/posixc/limits.h`
+      - `PATH_MAX` expands to `1024`
+  - the remaining registered native `workbench/libs` modules beyond `asl` are now mostly green on the active tree
+    - successful direct native builds:
+      - `lowlevel.library`
+      - `realtime.library`
+      - `rexxsyslib.library`
+      - `version.library`
+      - `workbench.library`
+      - `uuid.library`
+    - current active-file presence check under `bin/linux-x86_64/AROS/Libs`:
+      - present: `lowlevel`, `realtime`, `rexxsyslib`, `uuid`, `version`, `workbench`
+      - missing: `cgxvideo`
+  - `workbench/libs/cgxvideo` and `workbench/libs/uuid` are now registered as native CMake genmodule libraries
+    - new module manifests:
+      - `workbench/libs/cgxvideo/CMakeLists.txt`
+      - `workbench/libs/uuid/CMakeLists.txt`
+    - `workbench/libs/CMakeLists.txt` default native module set now includes both `cgxvideo` and `uuid`
+    - cache-upgrade logic was extended so existing default-valued `AROS_WORKBENCH_LIBS_NATIVE_MODULES` caches are promoted to the new default instead of silently leaving those two modules disabled
+  - the next concrete workbench native blocker is now `workbench/libs/cgxvideo`
+    - current native failure:
+      - undefined `OOPBase`
+      - undefined `__IHidd_Overlay`
+      - undefined `__LIBS__symbol_set_handler_missing`
+    - current native registration reaches real interface generation and module link, so this is no longer a coverage gap
+    - object-level split of the unresolveds:
+      - `cgxvideo_init.o` needs `OOPBase`
+      - `CreateVLayerHandleTagList.o` needs `OOPBase` and `__IHidd_Overlay`
+    - the underlying source convention differs from already-green `workbench/libs/cgfx`:
+      - `cgfx` explicitly declares `uselibs="oop"` in `mmakefile.src`
+      - `cgfx` private header maps generated public HIDD attr-base symbols back into its library base:
+        - `#define __IHidd_BitMap ...`
+        - `#define __IHidd_Gfx ...`
+      - `cgxvideo` does not declare `uselibs="oop"` and only defines the local alias `HiddOverlayAttrBase`, not the generated public symbol `__IHidd_Overlay`
+    - current implication:
+      - this is not just a missing CMake target registration
+      - the blocker is a legacy module/source convention mismatch that is not yet proven fixable from CMake glue alone without changing accepted source semantics
+    - current reference caveat:
+      - the active legacy parity tree does not currently contain `Libs/cgxvideo.library`, so there is still no artifact-level parity comparison for this module

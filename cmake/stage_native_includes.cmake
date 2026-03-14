@@ -487,6 +487,11 @@ _aros_publish_root_include_aliases("aros/stdc")
 _aros_publish_root_include_aliases("aros/posixc")
 _aros_publish_root_include_alias("dos/dos.h" "dos.h")
 
+# The installed legacy SDK does not publish a flat <limits.h>; leaving the
+# staged stdc alias here breaks modules like workbench/libs/locale that expect
+# PATH_MAX from <aros/posixc/limits.h>.
+file(REMOVE "${AROS_NATIVE_INCLUDE_DIR}/limits.h")
+
 _aros_generate_execbase_header()
 _aros_generate_arch_libcall_header()
 _aros_generate_arch_asm_header()
