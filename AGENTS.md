@@ -734,12 +734,8 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
       - `workbench/libs/uuid/CMakeLists.txt`
     - `workbench/libs/CMakeLists.txt` default native module set now includes both `cgxvideo` and `uuid`
     - cache-upgrade logic was extended so existing default-valued `AROS_WORKBENCH_LIBS_NATIVE_MODULES` caches are promoted to the new default instead of silently leaving those two modules disabled
-  - the next concrete workbench native blocker is now `workbench/libs/cgxvideo`
-    - current native failure:
-      - undefined `OOPBase`
-      - undefined `__IHidd_Overlay`
-      - undefined `__LIBS__symbol_set_handler_missing`
-    - current native registration reaches real interface generation and module link, so this is no longer a coverage gap
+  - `workbench/libs/cgxvideo` is now build-green natively
+    - `cgxvideo.library` is present under `bin/linux-x86_64/AROS/Libs`
     - object-level split of the unresolveds:
       - `cgxvideo_init.o` needs `OOPBase`
       - `CreateVLayerHandleTagList.o` needs `OOPBase` and `__IHidd_Overlay`
@@ -773,7 +769,42 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
           - weak `__LIBS__symbol_set_handler_missing`
       - status:
         - the checked-in CMake changes are in place
-        - a full narrow Ninja rebuild of `aros-workbench-libs-cgxvideo-native` is still pending completion on the NFS-backed tree, so this is not yet counted as a green native artifact
+        - a full narrow Ninja rebuild of `aros-workbench-libs-cgxvideo-native` now completes successfully on the active tree
+        - the active legacy parity tree still has no `Libs/cgxvideo.library`, so parity classification remains `no legacy reference artifact`
+  - the shared mmake logical-line reader needed another hardening pass for continued assignments followed by comment lines
+    - concrete failure before the fix:
+      - `compiler/crt` interface generation stopped in `strcasestr.c` with:
+        - `x86_64-aros-gcc: error: #USER_CPPFLAGS: No such file or directory`
+        - `x86_64-aros-gcc: error: +=: No such file or directory`
+      - root cause:
+        - continued `USER_CPPFLAGS := \` blocks in `compiler/crt/mmakefile.src` were still materializing as logical lines containing a trailing `;#USER_CPPFLAGS += ...` fragment inside CMake
+    - current generic fix:
+      - both copies of `_aros_read_mmake_logical_lines(...)` in `cmake/build_genmodule_module.cmake` and `cmake/AROSModule.cmake` now:
+        - treat a comment encountered during a continued logical line as an explicit line terminator
+        - strip trailing inline/list-shaped comment fragments with `([ \t]|;)+#.*$`
+        - quote the `if()` operands so list-valued intermediates cannot change the condition parse
+      - both parser sites that skip comment logical lines now accept `^[ \t;]*#`, not only bare `^#`
+    - local verification:
+      - the same narrow `aros-workbench-libs-cgxvideo-native` rebuild now passes both earlier `compiler/crt` interface stops and reaches the final `cgxvideo` module build
+  - the next concrete parity defect in the newly added workbench batch is now `workbench/libs/uuid`
+    - build status:
+      - `uuid.library` is present under `bin/linux-x86_64/AROS/Libs`
+    - targeted parity result against the active legacy reference tree:
+      - size mismatch: native `30448`, legacy `25384`
+    - current binary-shape difference:
+      - native `uuid.library` contains direct stdlib-side implementations and data such as:
+        - `snprintf`
+        - `strlen`
+        - `vsnprintf`
+        - `__vcformat`
+        - `__ctype_*`
+      - legacy `uuid.library` instead carries `StdlibBase` libreq/wrapper symbols such as:
+        - `__aros_libreq_StdlibBase`
+        - `__snprintf_StdlibBase_libreq`
+        - `__strlen_StdlibBase_libreq`
+    - current leading hypothesis:
+      - the remaining drift is likely in shared native link behavior, not `workbench/libs/uuid/CMakeLists.txt`
+      - the main suspect is the native genmodule link command grouping all available auto-link libraries under `-Wl,--start-group/--end-group`, which can pull extra `stdlib`/`crt` members that the legacy `%build_module` link order does not
   - the native genmodule linker was missing the target compiler runtime helper archive under `-nostdlib`
     - concrete failure before the fix:
       - `workbench/libs/kms` linked with unresolved `__popcountdi2`
@@ -824,16 +855,18 @@ Hard rule: use `rom/mmakefile.src` as the reference for ROM build ordering and u
         - `kms.library` (`20232` vs `20760`)
         - `muiscreen.library` (`25120` vs `25504`)
         - `reqtools.library` (`171944` vs `172368`)
-  - `aros-workbench-libs-complete-native` now gets cleanly back to the known `cgxvideo` blocker
+  - `aros-workbench-libs-complete-native` now gets past the former `cgxvideo` blocker
     - aggregate target verification reached successful native module builds for:
       - `amigaguide`
       - `asl`
       - `bullet`
       - `camd`
       - `cgfx`
+      - `cgxvideo`
+      - `uuid`
     - implication:
       - the earlier `asl`/`coolimages` include-shadowing failure is no longer the aggregate blocker
-      - the next actionable workbench blocker is still `cgxvideo`, with the same unresolved `OOPBase`, `__IHidd_Overlay`, and `__LIBS__symbol_set_handler_missing`
+      - the next actionable workbench issue has shifted from build coverage to parity cleanup, with `uuid.library` as the next concrete mismatch
   - targeted parity checks now need to be part of each migration increment, not a later cleanup pass
     - working rule for new native module batches:
       - after the build goes green, immediately compare each newly added artifact against the active legacy reference tree
