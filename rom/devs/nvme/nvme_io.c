@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2020-2025, The AROS Development Team. All rights reserved
+    Copyright (C) 2020-2026, The AROS Development Team. All rights reserved
 */
 
 #include <proto/exec.h>
@@ -36,6 +36,7 @@
 #include "nvme_debug.h"
 #include "nvme_intern.h"
 #include "nvme_queue_io.h"
+#include "nvme_hw.h"
 
 #include LC_LIBDEFS_FILE
 
@@ -70,7 +71,12 @@ static BOOL nvme_sector_rw(struct IORequest *io, UQUAD off64, BOOL is_write)
         io->io_Error = IOERR_BADADDRESS;
         return TRUE;
     } else if ((len == 0) || (len > (1 << unit->au_Bus->ab_Dev->dev_mdts) * unit->au_Bus->ab_Dev->pagesize)) {
-        bug("[NVME%02ld] %s: BADLENGTH (writing %u bytes to %x)\n", unit->au_UnitNum, __func__, len, (off64 >> unit->au_SecShift));
+        /* len == 0 is the standard TD64 capability probe (see e.g. fat-handler
+           Probe64BitSupport); reject it quietly */
+        if (len != 0)
+            bug("[NVME%02ld] %s: BADLENGTH (%s %u bytes at block %x, cmd %u, task '%s')\n", unit->au_UnitNum, __func__,
+                is_write ? "write" : "read", len, (off64 >> unit->au_SecShift), io->io_Command,
+                FindTask(NULL)->tc_Node.ln_Name ? FindTask(NULL)->tc_Node.ln_Name : "<unnamed>");
         io->io_Error = IOERR_BADLENGTH;
         return TRUE;
     }
@@ -136,6 +142,30 @@ static BOOL nvme_sector_rw(struct IORequest *io, UQUAD off64, BOOL is_write)
         nvme_dma_release(&ioehandle, TRUE);
         io->io_Error = IOERR_ABORTED;
         return TRUE;
+    }
+
+    /*
+     * Collect it here if the controller has already answered, for the
+     * same reason the admin queue does: one pin is shared by every
+     * queue, and a completion posted while the line is still down
+     * announces itself with nothing. Draining now hands the reply to
+     * the queue's task exactly as the interrupt would have, and the
+     * queue is walked under Disable() so the two cannot collide.
+     *
+     * Wait on the request just submitted rather than on finding work,
+     * so this ends the moment it is answered - by us where nothing
+     * announced it, and immediately where the handler got there first.
+     * Watching for work instead would run the count out every time on
+     * a controller whose interrupt is doing its job, since the queue
+     * it is looking at has already been emptied.
+     */
+    {
+        struct completionevent_handler *slot =
+            &nvmeq->ce_entries[cmdio.common.op.command_id];
+        ULONG spins = 4096;
+
+        while (spins-- && !slot->ceh_Reply)
+            nvme_process_cq(nvmeq);
     }
 
     return FALSE;

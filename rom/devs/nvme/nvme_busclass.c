@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2020-2025, The AROS Development Team. All rights reserved.
+    Copyright (C) 2020-2026, The AROS Development Team. All rights reserved.
 */
 
 #include <aros/debug.h>
@@ -45,7 +45,11 @@
 #if defined(DEBUG) && (DEBUG > 1)
 #define NVME_DUMP_READS
 #endif
+#if defined(DEBUG) && (DEBUG > 0)
+#define DIRQ(x) x
+#else
 #define DIRQ(x)
+#endif
 #define DIO(x)
 //#define NVME_DUMP_READS
 
@@ -62,11 +66,11 @@ static AROS_INTH1(NVME_IOIntCode, struct nvme_queue *, nvmeq)
 
     DIRQ(bug ("[NVME:Bus] %s(0x%p)\n", __func__, nvmeq);)
 
-    nvme_process_cq(nvmeq);
+    int processed = nvme_process_cq(nvmeq);
 
     DIRQ(bug ("[NVME:Bus] %s: finished\n", __func__);)
 
-    return TRUE;
+    return (processed != 0);
 
     AROS_INTFUNC_EXIT
 }

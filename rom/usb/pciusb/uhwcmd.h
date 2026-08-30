@@ -3,14 +3,7 @@
 
 #include "debug.h"
 #include "pci_aros.h"
-
-#include "uhcichip.h"
-#include "ohcichip.h"
-#include "ehcichip.h"
 #include "pciusb.h"
-
-/* Uncomment to enable the W.I.P Isochornous transfer stubs */
-//#define PCIUSB_WIP_ISO
 
 #if (__WORDSIZE == 64)
 
@@ -31,7 +24,7 @@ void Close_Unit(struct PCIDevice *base, struct PCIUnit *unit, struct IOUsbHWReq 
 
 void SureCause(struct PCIDevice *base, struct Interrupt *interrupt);
 BOOL uhwOpenTimer(struct PCIUnit *unit, struct PCIDevice *base);
-void uhwDelayMS(ULONG milli, struct PCIUnit *unit);
+void uhwDelayMS(ULONG milli, struct timerequest *timerreq);
 void uhwCheckSpecialCtrlTransfers(struct PCIController *hc, struct IOUsbHWReq *ioreq);
 void uhwCheckRootHubChanges(struct PCIUnit *unit);
 
@@ -63,168 +56,27 @@ BOOL cmdAbortIO(struct IOUsbHWReq *ioreq, struct PCIDevice *base);
 
 void TermIO(struct IOUsbHWReq *ioreq, struct PCIDevice *base);
 
+AROS_INTP(uhwPeriodicInt);
 AROS_INTP(uhwNakTimeoutInt);
 
 BOOL pciInit(struct PCIDevice *hd);
 void pciExpunge(struct PCIDevice *hd);
+APTR pciAllocAligned(struct PCIController *, struct MemEntry *, ULONG, ULONG, ULONG);
 BOOL pciAllocUnit(struct PCIUnit *hu);
 void pciFreeUnit(struct PCIUnit *hu);
 APTR pciGetPhysical(struct PCIController *hc, APTR virtaddr);
 
-/* uhcichip.c, in order of appearance */
-void uhciFreeQContext(struct PCIController *hc, struct UhciQH *uqh);
-void uhciUpdateIntTree(struct PCIController *hc);
-void uhciCheckPortStatusChange(struct PCIController *hc);
-void uhciHandleFinishedTDs(struct PCIController *hc);
-void uhciScheduleCtrlTDs(struct PCIController *hc);
-void uhciScheduleIntTDs(struct PCIController *hc);
-void uhciScheduleBulkTDs(struct PCIController *hc);
-void uhciUpdateFrameCounter(struct PCIController *hc);
-BOOL uhciInit(struct PCIController *hc, struct PCIUnit *hu);
-void uhciFree(struct PCIController *hc, struct PCIUnit *hu);
-
-static inline struct UhciQH * uhciAllocQH(struct PCIController *hc);
-static inline void uhciFreeQH(struct PCIController *hc, struct UhciQH *uqh);
-static inline struct UhciTD * uhciAllocTD(struct PCIController *hc);
-static inline void uhciFreeTD(struct PCIController *hc, struct UhciTD *utd);
-
-/* ehcichip.c, in order of appearance */
-void ehciFreeAsyncContext(struct PCIController *hc, struct IOUsbHWReq *ioreq);
-void ehciFreePeriodicContext(struct PCIController *hc, struct IOUsbHWReq *ioreq);
-void ehciFreeQHandTDs(struct PCIController *hc, struct EhciQH *eqh);
-void ehciUpdateIntTree(struct PCIController *hc);
-void ehciHandleFinishedTDs(struct PCIController *hc);
-void ehciScheduleCtrlTDs(struct PCIController *hc);
-void ehciScheduleIntTDs(struct PCIController *hc);
-void ehciScheduleBulkTDs(struct PCIController *hc);
-void ehciUpdateFrameCounter(struct PCIController *hc);
-BOOL ehciInit(struct PCIController *hc, struct PCIUnit *hu);
-void ehciFree(struct PCIController *hc, struct PCIUnit *hu);
-
-static inline struct EhciQH * ehciAllocQH(struct PCIController *hc);
-static inline void ehciFreeQH(struct PCIController *hc, struct EhciQH *eqh);
-static inline struct EhciTD * ehciAllocTD(struct PCIController *hc);
-static inline void ehciFreeTD(struct PCIController *hc, struct EhciTD *etd);
-
-UBYTE PCIXReadConfigByte(struct PCIController *hc, UBYTE offset);
-UWORD PCIXReadConfigWord(struct PCIController *hc, UBYTE offset);
-ULONG PCIXReadConfigLong(struct PCIController *hc, UBYTE offset);
-void PCIXWriteConfigByte(struct PCIController *hc, ULONG offset, UBYTE value);
-void PCIXWriteConfigWord(struct PCIController *hc, ULONG offset, UWORD value);
-void PCIXWriteConfigLong(struct PCIController *hc, ULONG offset, ULONG value);
 BOOL PCIXAddInterrupt(struct PCIController *hc, struct Interrupt *interrupt);
 
-struct my_NSDeviceQueryResult
-{
-    ULONG   DevQueryFormat;         /* this is type 0               */
-    ULONG   SizeAvailable;          /* bytes available              */
-    UWORD   DeviceType;             /* what the device does         */
-    UWORD   DeviceSubType;          /* depends on the main type     */
-    const UWORD *SupportedCommands; /* 0 terminated list of cmd's   */
-};
+void uhwDelayMicro(ULONG micro, struct timerequest *timerreq);
 
-/* /// "uhciAllocQH()" */
-static inline struct UhciQH * uhciAllocQH(struct PCIController *hc)
-{
-    struct UhciQH *uqh = hc->hc_UhciQHPool;
+struct RTIsoNode *pciusbAllocStdIsoNode(struct PCIController *hc, struct IOUsbHWReq *ioreq);
+void pciusbFreeStdIsoNode(struct PCIController *hc, struct RTIsoNode *rtn);
 
-    if(!uqh)
-    {
-        // out of QHs!
-        KPRINTF(20, ("Out of QHs!\n"));
-        return NULL;
-    }
-
-    hc->hc_UhciQHPool = (struct UhciQH *) uqh->uqh_Succ;
-
-    uqh->uqh_SetupBuffer = NULL;
-    uqh->uqh_DataBuffer = NULL;
-    return(uqh);
-}
-/* \\\ */
-
-/* /// "uhciFreeQH()" */
-static inline void uhciFreeQH(struct PCIController *hc, struct UhciQH *uqh)
-{
-    uqh->uqh_Succ = (struct UhciXX *) hc->hc_UhciQHPool;
-    hc->hc_UhciQHPool = uqh;
-}
-/* \\\ */
-
-/* /// "uhciAllocTD()" */
-static inline struct UhciTD * uhciAllocTD(struct PCIController *hc)
-{
-    struct UhciTD *utd = hc->hc_UhciTDPool;
-
-    if(!utd)
-    {
-        // out of TDs!
-        KPRINTF(20, ("Out of TDs!\n"));
-        return NULL;
-    }
-
-    hc->hc_UhciTDPool = (struct UhciTD *) utd->utd_Succ;
-    return(utd);
-}
-/* \\\ */
-
-/* /// "uhciFreeTD()" */
-static inline void uhciFreeTD(struct PCIController *hc, struct UhciTD *utd)
-{
-    utd->utd_Succ = (struct UhciXX *) hc->hc_UhciTDPool;
-    hc->hc_UhciTDPool = utd;
-}
-/* \\\ */
-
-/* /// "ehciAllocQH()" */
-static inline struct EhciQH * ehciAllocQH(struct PCIController *hc)
-{
-    struct EhciQH *eqh = hc->hc_EhciQHPool;
-
-    if(!eqh)
-    {
-        // out of QHs!
-        KPRINTF(20, ("Out of QHs!\n"));
-        return NULL;
-    }
-
-    hc->hc_EhciQHPool = (struct EhciQH *) eqh->eqh_Succ;
-    return(eqh);
-}
-/* \\\ */
-
-/* /// "ehciFreeQH()" */
-static inline void ehciFreeQH(struct PCIController *hc, struct EhciQH *eqh)
-{
-    eqh->eqh_Succ = hc->hc_EhciQHPool;
-    hc->hc_EhciQHPool = eqh;
-}
-/* \\\ */
-
-/* /// "ehciAllocTD()" */
-static inline struct EhciTD * ehciAllocTD(struct PCIController *hc)
-{
-    struct EhciTD *etd = hc->hc_EhciTDPool;
-
-    if(!etd)
-    {
-        // out of TDs!
-        KPRINTF(20, ("Out of TDs!\n"));
-        return NULL;
-    }
-
-    hc->hc_EhciTDPool = (struct EhciTD *) etd->etd_Succ;
-    return(etd);
-}
-/* \\\ */
-
-/* /// "ehciFreeTD()" */
-static inline void ehciFreeTD(struct PCIController *hc, struct EhciTD *etd)
-{
-    etd->etd_Succ = hc->hc_EhciTDPool;
-    hc->hc_EhciTDPool = etd;
-}
-/* \\\ */
+#if defined(DEBUG_ROOTHUB)
+#define pciusbRHDebug(sub,fmt,args...)                pciusbDebug(sub,fmt,##args)
+#else
+#define pciusbRHDebug(sub,fmt,args...)
+#endif
 
 #endif /* UHWCMD_H */
-

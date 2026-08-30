@@ -22,9 +22,9 @@
  */
 
 #include "nouveau_intern.h"
-#include "nouveau_class.h"
 #include <proto/oop.h>
 #include <proto/exec.h>
+#include <stdlib.h>
 
 #undef HiddBitMapAttrBase
 #define HiddBitMapAttrBase  (SD(cl)->bitMapAttrBase)
@@ -722,7 +722,7 @@ BOOL HiddNouveauWriteFromRAM(
             {
                 SD(cl)->mid_GetPixFmt, srcPixFmt
             }, *gpf = &__gpf;
-            
+
             OOP_GetAttr(o, aHidd_BitMap_PixFmt, (APTR)&dstPF);
             OOP_GetAttr(o, aHidd_BitMap_GfxHidd, (APTR)&gfxHidd);
             srcPF = (OOP_Object *)OOP_DoMethod(gfxHidd, (OOP_Msg)gpf);
@@ -836,7 +836,7 @@ BOOL HiddNouveauReadIntoRAM(
             {
                 SD(cl)->mid_GetPixFmt, dstPixFmt
             }, *gpf = &__gpf;
-            
+
             OOP_GetAttr(o, aHidd_BitMap_PixFmt, (APTR)&srcPF);
             OOP_GetAttr(o, aHidd_BitMap_GfxHidd, (APTR)&gfxHidd);
             dstPF = (OOP_Object *)OOP_DoMethod(gfxHidd, (OOP_Msg)gpf);
@@ -867,16 +867,17 @@ static inline VOID HiddNouveau3DCopyBoxFromGART(struct CardData * carddata,
 
     /* Wrap GART */
     srcdata.bo = carddata->GART;
-    srcdata.width = width;
-    srcdata.height = height;
-    srcdata.depth = 32;
+    srcdata.drawable.width = width;
+    srcdata.drawable.height = height;
+    srcdata.drawable.depth = srcdata.drawable.bitsPerPixel = 32;
+    srcdata.drawable.pScreen = carddata;
     srcdata.bytesperpixel = 4;
     srcdata.pitch = gartpitch;
 
     LOCK_ENGINE
 
     /* Render using 3D engine */
-    switch(carddata->architecture)
+    switch(carddata->Architecture)
     {
     case(NV_ARCH_40):
         HIDDNouveauNV403DCopyBox(carddata,
@@ -926,7 +927,7 @@ BOOL HiddNouveauAccelARGBUpload3D(
             line_count = height;
 
         /* Upload to GART */
-        if (nouveau_bo_map(carddata->GART, NOUVEAU_BO_WR))
+        if (nouveau_bo_map(carddata->GART, NOUVEAU_BO_WR, carddata->client))
             return FALSE;
         dst = carddata->GART->map;
 
@@ -977,7 +978,6 @@ BOOL HiddNouveauAccelARGBUpload3D(
 #endif
 
         src += srcpitch * line_count;
-        nouveau_bo_unmap(carddata->GART);
 
         HiddNouveau3DCopyBoxFromGART(carddata, dstdata, line_len, x, y, width, line_count);
 
@@ -1016,7 +1016,7 @@ BOOL HiddNouveauAccelAPENUpload3D(
             line_count = height;
 
         /* Upload to GART */
-        if (nouveau_bo_map(carddata->GART, NOUVEAU_BO_WR))
+        if (nouveau_bo_map(carddata->GART, NOUVEAU_BO_WR, carddata->client))
             return FALSE;
         dst = carddata->GART->map;
 
@@ -1047,9 +1047,7 @@ BOOL HiddNouveauAccelAPENUpload3D(
                 dst += line_len;
             }
         }
-        
-        nouveau_bo_unmap(carddata->GART);
-        
+
         HiddNouveau3DCopyBoxFromGART(carddata, dstdata, line_len, x, y, width, line_count);
 
         height -= line_count;
@@ -1118,19 +1116,17 @@ VOID HIDDNouveauBitMapDrawSolidLine(struct HIDDNouveauBitMapData * bmdata,
         /*
             Horizontal line drawing code.
         */
-        IPTR addr = map + (bmdata->pitch * y1) + (x1 * bmdata->bytesperpixel);
-    
         for(i = x1; i != x2; i++)
-        {    
+        {
             /* Pixel inside ? */
             if ((!doclip) || (!POINT_OUTSIDE_CLIP(gc, i, y1)))
             {
+                IPTR addr = map + (bmdata->pitch * y1) + (i * bmdata->bytesperpixel);
                 if (bmdata->bytesperpixel == 2)
                     writew(fg, (APTR)addr);
                 else
                     writel(fg, (APTR)addr);
             }
-            addr += bmdata->bytesperpixel;
         }
     }
     else if (x1 == x2)
@@ -1138,19 +1134,17 @@ VOID HIDDNouveauBitMapDrawSolidLine(struct HIDDNouveauBitMapData * bmdata,
         /*
             Vertical line drawing code.
         */
-        IPTR addr = map + (bmdata->pitch * y1) + (x1 * bmdata->bytesperpixel);
-    
         for(i = y1; i != y2; i++)
-        {    
+        {
             /* Pixel inside ? */
             if (!doclip || !POINT_OUTSIDE_CLIP(gc, x1, i ))
             {
+                IPTR addr = map + (bmdata->pitch * i) + (x1 * bmdata->bytesperpixel);
                 if (bmdata->bytesperpixel == 2)
                     writew(fg, (APTR)addr);
                 else
                     writel(fg, (APTR)addr);
             }
-            addr += bmdata->pitch;
         }
     }
     else
@@ -1159,9 +1153,8 @@ VOID HIDDNouveauBitMapDrawSolidLine(struct HIDDNouveauBitMapData * bmdata,
             Generic line drawing code.
         */
         WORD dx, dy, x, y, incrE, incrNE, d, s1, s2, t;
-        IPTR addr;
         
-        /* Restore original coordinates - important for non-straight lines as 
+        /* Restore original coordinates - important for non-straight lines as
            normalization might have switched them */
         x1 = destX1;
         y1 = destY1;
@@ -1197,11 +1190,11 @@ VOID HIDDNouveauBitMapDrawSolidLine(struct HIDDNouveauBitMapData * bmdata,
         x = x1; y = y1;
         
         for(i = 0; i <= dx; i++)
-        {    
+        {
             /* Pixel inside ? */
             if (!doclip || !POINT_OUTSIDE_CLIP(gc, x, y ))
             {
-                addr = map + (x * bmdata->bytesperpixel) + (bmdata->pitch * y);
+                IPTR addr = map + (x * bmdata->bytesperpixel) + (bmdata->pitch * y);
                 if (bmdata->bytesperpixel == 2)
                     writew(fg, (APTR)addr);
                 else

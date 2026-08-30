@@ -1252,8 +1252,12 @@ void nExamineAudioDescriptors(struct NepClassAudio *nch)
                                           compare_frequencies);
                                 } else {
                                     const ULONG *freqtab = commonFreqs;
-                                    nam->nam_MinFreq = uat1f->tSamFreq0[0]|(uat1f->tSamFreq0[1]<<8)|(uat1f->tSamFreq0[2]<<16);
-                                    nam->nam_MaxFreq = uat1f->tSamFreq0[3]|(uat1f->tSamFreq0[4]<<8)|(uat1f->tSamFreq0[5]<<16);
+                                    /* Continuous range: tSamFreq0 holds the lower
+                                       bound, the following 3 descriptor bytes the
+                                       upper bound. */
+                                    const UBYTE *fptr = uat1f->tSamFreq0;
+                                    nam->nam_MinFreq = fptr[0]|(fptr[1]<<8)|(fptr[2]<<16);
+                                    nam->nam_MaxFreq = fptr[3]|(fptr[4]<<8)|(fptr[5]<<16);
                                     if(nam->nam_MaxFreq > 64000)
                                     {
                                         nam->nam_MaxFreq = 64000;
@@ -2781,7 +2785,7 @@ AROS_UFH3(void, nConv8BitMono,
     WORD *srcptr = hook->h_Data;
     do
     {
-        *btarptr++ = *((BYTE *) srcptr);
+        *btarptr++ = (BYTE) (*srcptr >> 8);
         srcptr++;
     } while(--cnt);
     
@@ -2800,9 +2804,9 @@ AROS_UFH3(void, nConv8BitStereo,
     WORD *srcptr = hook->h_Data;
     do
     {
-        *btarptr++ = *((BYTE *) srcptr);
+        *btarptr++ = (BYTE) (*srcptr >> 8);
         srcptr++;
-        *btarptr++ = *((BYTE *) srcptr);
+        *btarptr++ = (BYTE) (*srcptr >> 8);
         srcptr++;
     } while(--cnt);
     
@@ -2832,16 +2836,18 @@ AROS_UFH3(void, nConv16BitMono,
 /* /// "nConv16BitStereo()" */
 AROS_UFH3(void, nConv16BitStereo,
           AROS_UFPA(struct Hook *, hook, A0),
-          AROS_UFPA(ULONG *, ltarptr, A2),
+          AROS_UFPA(UWORD *, wtarptr, A2),
           AROS_UFPA(ULONG, cnt, A1))
 {
     AROS_USERFUNC_INIT
-    
-    ULONG *lsrcptr = hook->h_Data;
+
+    UWORD *srcptr = hook->h_Data;
     do
     {
-        *ltarptr++ = ((*lsrcptr>>8) & 0x00ff00ff)|((*lsrcptr<<8) & 0xff00ff00);
-        lsrcptr++;
+        *wtarptr++ = AROS_WORD2LE(*srcptr);
+        srcptr++;
+        *wtarptr++ = AROS_WORD2LE(*srcptr);
+        srcptr++;
     } while(--cnt);
     
     AROS_USERFUNC_EXIT
@@ -3360,7 +3366,9 @@ AROS_LH2(ULONG, subLibAllocAudio,
         audioctrl->ahiac_MaxPlayerFreq <<= 16;
     }
 
-    audioctrl->ahiac_Channels = nam->nam_NumChannels;
+    /* ahiac_Channels is the number of mixer channels the application asked
+       for, not the device's output channel count - AHI sizes its per-channel
+       data by it. The device's layout is reported via AHISF_KNOWSTEREO. */
     /*audioctrl->ahiac_BuffType = nam->nam_SampleType; */
 
     for(cnt = 0; cnt < nam->nam_NumFrequencies; cnt++)

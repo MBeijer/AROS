@@ -9,10 +9,15 @@
 
 #include "massstorage.class.h"
 
-#define DEF_NAKTIMEOUT  (100)
+#define DEF_NAKTIMEOUT  (600)
+
+static inline BOOL nIsBulkTransport(ULONG proto)
+{
+    return (proto == MS_PROTO_BULK) || (proto == MS_PROTO_UAS);
+}
 
 /* /// "Lib Stuff" */
-static const STRPTR GM_UNIQUENAME(libname) = MOD_NAME_STRING;
+const STRPTR GM_UNIQUENAME(libname) = MOD_NAME_STRING;
 
 static
 const APTR GM_UNIQUENAME(DevFuncTable)[] =
@@ -39,6 +44,21 @@ static int GM_UNIQUENAME(libInit)(LIBBASETYPEPTR nh)
     nh->nh_UtilityBase = OpenLibrary("utility.library", 39);
     if(UtilityBase)
     {
+        /*
+         * Opened here once and closed in libExpunge. The removable task and
+         * the partition scanner both reach these through the class base, and
+         * the unit task blocks until the removable task reports ready.
+         *
+         * Built into ROM, this class can be the driver for the very volume
+         * those libraries would be loaded from, so opening them from the
+         * removable task would leave the unit task waiting on a disk it is
+         * itself the one serving. Loaded from disk the volume is already up
+         * and the same opens are harmless, but the code has to suit both.
+         */
+        nh->nh_ExpansionBase = OpenLibrary("expansion.library", 37);
+        nh->nh_PartitionBase = OpenLibrary("partition.library", 1);
+        nh->nh_PsdBase = OpenLibrary("poseidon.library", 4);
+
         /* Initialize device node & library struct */
         KPRINTF(1, ("UtilityOkay\n"));
         NewList(&nh->nh_Units);
@@ -51,7 +71,8 @@ static int GM_UNIQUENAME(libInit)(LIBBASETYPEPTR nh)
         strcpy(ncm->ncm_LUNNumStr, "All");
         ncm->ncm_CDC = cdc = AllocVec(sizeof(struct ClsDevCfg), MEMF_PUBLIC|MEMF_CLEAR);
         ncm->ncm_CUC = cuc = AllocVec(sizeof(struct ClsUnitCfg), MEMF_PUBLIC|MEMF_CLEAR);
-        if(cdc && cuc)
+        if(cdc && cuc &&
+           nh->nh_ExpansionBase && nh->nh_PartitionBase && nh->nh_PsdBase)
         {
             KPRINTF(1, ("MakeLibrary\n"));
             if((nh->nh_DevBase = (struct NepMSDevBase *) MakeLibrary((APTR) GM_UNIQUENAME(DevFuncTable), NULL, (APTR) GM_UNIQUENAME(devInit),
@@ -75,6 +96,9 @@ static int GM_UNIQUENAME(libInit)(LIBBASETYPEPTR nh)
     {
         FreeVec(cdc);
         FreeVec(cuc);
+        CloseLibrary(nh->nh_PsdBase);
+        CloseLibrary(nh->nh_PartitionBase);
+        CloseLibrary(nh->nh_ExpansionBase);
         CloseLibrary(UtilityBase);
     }
     KPRINTF(10, ("libInit: Ok\n"));
@@ -141,6 +165,23 @@ static int GM_UNIQUENAME(libExpunge)(LIBBASETYPEPTR nh)
         FreeVec(ncm->ncm_CDC);
         FreeVec(ncm->ncm_CUC);
 
+        /* Opened in libInit and held for the life of the class. */
+        if(nh->nh_ExpansionBase)
+        {
+            CloseLibrary(nh->nh_ExpansionBase);
+            nh->nh_ExpansionBase = NULL;
+        }
+        if(nh->nh_PartitionBase)
+        {
+            CloseLibrary(nh->nh_PartitionBase);
+            nh->nh_PartitionBase = NULL;
+        }
+        if(nh->nh_PsdBase)
+        {
+            CloseLibrary(nh->nh_PsdBase);
+            nh->nh_PsdBase = NULL;
+        }
+
         nh->nh_DevBase->np_Library.lib_OpenCnt--;
         RemDevice((struct Device *) nh->nh_DevBase);
         KPRINTF(5, ("libExpunge: Unloading done! massstorage.class expunged!\n\n"));
@@ -206,7 +247,8 @@ struct NepClassMS * GM_UNIQUENAME(usbAttemptInterfaceBinding)(struct NepMSBase *
             (subclass == MS_UFI_SUBCLASS)) &&
            ((proto == MS_PROTO_BULK) ||
             (proto == MS_PROTO_CB) ||
-            (proto == MS_PROTO_CBI)))
+            (proto == MS_PROTO_CBI) ||
+            (proto == MS_PROTO_UAS)))
         {
             return(GM_UNIQUENAME(usbForceInterfaceBinding)(nh, pif));
         }
@@ -248,7 +290,7 @@ struct NepClassMS * GM_UNIQUENAME(usbForceInterfaceBinding)(struct NepMSBase *nh
     ULONG patchflags = 0;
     BOOL delayedstore = FALSE;
 
-    KPRINTF(1, ("nepMSAttemptInterfaceBinding(%08lx)\n", pif));
+    KPRINTF(1, ("nepMSForceInterfaceBinding(%08lx)\n", pif));
     if(!(mp = CreateMsgPort()))
     {
         return(NULL);
@@ -274,7 +316,8 @@ struct NepClassMS * GM_UNIQUENAME(usbForceInterfaceBinding)(struct NepMSBase *nh
                     TAG_END);
         maxlun = 0;
         /* Patches and fixes */
-        if((proto != MS_PROTO_BULK) && (proto != MS_PROTO_CB) && (proto != MS_PROTO_CBI))
+        if((proto != MS_PROTO_BULK) && (proto != MS_PROTO_CB) &&
+           (proto != MS_PROTO_CBI) && (proto != MS_PROTO_UAS))
         {
             proto = MS_PROTO_BULK;
         }
@@ -287,7 +330,7 @@ struct NepClassMS * GM_UNIQUENAME(usbForceInterfaceBinding)(struct NepMSBase *nh
             subclass = MS_SCSI_SUBCLASS;
         }
 
-        if(proto == MS_PROTO_BULK)
+        if(nIsBulkTransport(proto))
         {
             if(vendid == 0x05e3) /* 2.5 HD Wrapper by Eagle Tec */
             {
@@ -529,7 +572,7 @@ struct NepClassMS * GM_UNIQUENAME(usbForceInterfaceBinding)(struct NepMSBase *nh
                         }
                     }
 
-                    if(!(patchflags & PFF_SINGLE_LUN))
+                    if((!(patchflags & PFF_SINGLE_LUN)) && (proto != MS_PROTO_UAS))
                     {
                         retry = 3;
                         maxlun = 0;
@@ -1388,6 +1431,216 @@ AROS_UFH0(void, GM_UNIQUENAME(nMSTask))
 }
 /* \\\ */
 
+static BOOL nUasCollectEndpoints(struct NepClassMS *ncm)
+{
+    struct PsdDescriptor *pdd = NULL;
+    struct PsdEndpoint *pep;
+    UBYTE *data;
+    UWORD dtype;
+    UWORD len;
+    IPTR  eptype;
+    IPTR  is_in;
+    UBYTE pipe_id;
+
+    while((pdd = psdFindDescriptor(ncm->ncm_Device, pdd,
+                                   DDA_Interface, ncm->ncm_Interface,
+                                   TAG_END)))
+    {
+        psdGetAttrs(PGA_DESCRIPTOR, pdd,
+                    DDA_DescriptorType, &dtype,
+                    DDA_DescriptorData, &data,
+                    DDA_DescriptorLength, &len,
+                    DDA_Endpoint, &pep,
+                    TAG_END);
+        if((!pep) || (!data) || (len < 3))
+        {
+            continue;
+        }
+        if((dtype != UAS_DESC_PIPE_USAGE) && (dtype != UAS_DESC_CS_ENDPOINT))
+        {
+            continue;
+        }
+        pipe_id = 0;
+        if(dtype == UAS_DESC_PIPE_USAGE)
+        {
+            pipe_id = data[2];
+        } else if(len >= 4) {
+            pipe_id = data[3];
+        }
+        if(!pipe_id)
+        {
+            continue;
+        }
+        psdGetAttrs(PGA_ENDPOINT, pep,
+                    EA_TransferType, &eptype,
+                    EA_IsIn, &is_in,
+                    TAG_END);
+        if(eptype != USEAF_BULK)
+        {
+            continue;
+        }
+        switch(pipe_id)
+        {
+            case UAS_PIPE_ID_COMMAND:
+                if(is_in)
+                {
+                    break;
+                }
+                if(!ncm->ncm_EPCmd)
+                {
+                    ncm->ncm_EPCmd = pep;
+                }
+                break;
+            case UAS_PIPE_ID_STATUS:
+                if(!is_in)
+                {
+                    break;
+                }
+                if(!ncm->ncm_EPStatus)
+                {
+                    ncm->ncm_EPStatus = pep;
+                }
+                break;
+            case UAS_PIPE_ID_DATA_IN:
+                if(!is_in)
+                {
+                    break;
+                }
+                if(!ncm->ncm_EPIn)
+                {
+                    ncm->ncm_EPIn = pep;
+                }
+                break;
+            case UAS_PIPE_ID_DATA_OUT:
+                if(is_in)
+                {
+                    break;
+                }
+                if(!ncm->ncm_EPOut)
+                {
+                    ncm->ncm_EPOut = pep;
+                }
+                break;
+        }
+    }
+
+    return ncm->ncm_EPCmd && ncm->ncm_EPStatus && ncm->ncm_EPIn && ncm->ncm_EPOut;
+}
+
+static void nUasDisableStreams(struct NepClassMS *ncm)
+{
+    if(ncm->ncm_EPInStream)
+    {
+        psdCloseStream(ncm->ncm_EPInStream);
+        ncm->ncm_EPInStream = NULL;
+    }
+    if(ncm->ncm_EPOutStream)
+    {
+        psdCloseStream(ncm->ncm_EPOutStream);
+        ncm->ncm_EPOutStream = NULL;
+    }
+    if(ncm->ncm_EPIn)
+    {
+        psdSetAttrs(PGA_ENDPOINT, ncm->ncm_EPIn,
+                    EA_StreamBase, 0,
+                    TAG_END);
+    }
+    if(ncm->ncm_EPOut)
+    {
+        psdSetAttrs(PGA_ENDPOINT, ncm->ncm_EPOut,
+                    EA_StreamBase, 0,
+                    TAG_END);
+    }
+    ncm->ncm_UasStreamId = 0;
+}
+
+static void nUasInitStreams(struct NepClassMS *ncm)
+{
+    IPTR maxstreams_in = 0;
+    IPTR maxstreams_out = 0;
+    IPTR maxpkt_in = 0;
+    IPTR maxpkt_out = 0;
+    BOOL use_timeout = ncm->ncm_CDC && ncm->ncm_CDC->cdc_NakTimeout;
+
+    ncm->ncm_UasStreamId = 0;
+    if(!ncm->ncm_EPIn || !ncm->ncm_EPOut)
+    {
+        return;
+    }
+
+    psdGetAttrs(PGA_ENDPOINT, ncm->ncm_EPIn,
+                EA_MaxStreams, &maxstreams_in,
+                EA_MaxPktSize, &maxpkt_in,
+                TAG_END);
+    psdGetAttrs(PGA_ENDPOINT, ncm->ncm_EPOut,
+                EA_MaxStreams, &maxstreams_out,
+                EA_MaxPktSize, &maxpkt_out,
+                TAG_END);
+
+    if(!maxstreams_in || !maxstreams_out)
+    {
+        return;
+    }
+
+    psdSetAttrs(PGA_ENDPOINT, ncm->ncm_EPIn,
+                EA_StreamBase, 1,
+                TAG_END);
+    psdSetAttrs(PGA_ENDPOINT, ncm->ncm_EPOut,
+                EA_StreamBase, 1,
+                TAG_END);
+
+    if(use_timeout)
+    {
+        ncm->ncm_EPOutStream = psdOpenStream(ncm->ncm_EPOut,
+                                            PSA_BufferedWrite, FALSE,
+                                            PSA_NoZeroPktTerm, TRUE,
+                                            PSA_NumPipes, 1,
+                                            PSA_BufferSize, maxpkt_out,
+                                            PSA_NakTimeout, TRUE,
+                                            PSA_NakTimeoutTime, ncm->ncm_CDC->cdc_NakTimeout*100,
+                                            TAG_END);
+    } else {
+        ncm->ncm_EPOutStream = psdOpenStream(ncm->ncm_EPOut,
+                                            PSA_BufferedWrite, FALSE,
+                                            PSA_NoZeroPktTerm, TRUE,
+                                            PSA_NumPipes, 1,
+                                            PSA_BufferSize, maxpkt_out,
+                                            TAG_END);
+    }
+    if(!ncm->ncm_EPOutStream)
+    {
+        nUasDisableStreams(ncm);
+        return;
+    }
+
+    if(use_timeout)
+    {
+        ncm->ncm_EPInStream = psdOpenStream(ncm->ncm_EPIn,
+                                           PSA_BufferedRead, FALSE,
+                                           PSA_ReadAhead, FALSE,
+                                           PSA_NumPipes, 1,
+                                           PSA_BufferSize, maxpkt_in,
+                                           PSA_NakTimeout, TRUE,
+                                           PSA_NakTimeoutTime, ncm->ncm_CDC->cdc_NakTimeout*100,
+                                           TAG_END);
+    } else {
+        ncm->ncm_EPInStream = psdOpenStream(ncm->ncm_EPIn,
+                                           PSA_BufferedRead, FALSE,
+                                           PSA_ReadAhead, FALSE,
+                                           PSA_NumPipes, 1,
+                                           PSA_BufferSize, maxpkt_in,
+                                           TAG_END);
+    }
+    if(!ncm->ncm_EPInStream)
+    {
+        nUasDisableStreams(ncm);
+        return;
+    }
+
+    ncm->ncm_UasStreamId = 1;
+}
+
+
 /* /// "nAllocMS()" */
 struct NepClassMS * GM_UNIQUENAME(nAllocMS)(void)
 {
@@ -1397,6 +1650,9 @@ struct NepClassMS * GM_UNIQUENAME(nAllocMS)(void)
 
     thistask = FindTask(NULL);
     ncm = thistask->tc_UserData;
+    ncm->ncm_EPInStream = NULL;
+    ncm->ncm_EPOutStream = NULL;
+    ncm->ncm_UasStreamId = 0;
     do
     {
         if(!(ncm->ncm_Base = OpenLibrary("poseidon.library", 4)))
@@ -1404,41 +1660,74 @@ struct NepClassMS * GM_UNIQUENAME(nAllocMS)(void)
             Alert(AG_OpenLib | AO_Unknown);
             break;
         }
-        ncm->ncm_EPInt = psdFindEndpoint(ncm->ncm_Interface, NULL,
-                                         EA_IsIn, TRUE,
-                                         EA_TransferType, USEAF_INTERRUPT,
-                                         TAG_END);
-        ncm->ncm_EPIn = psdFindEndpoint(ncm->ncm_Interface, NULL,
-                                        EA_IsIn, TRUE,
-                                        EA_TransferType, USEAF_BULK,
-                                        TAG_END);
-        ncm->ncm_EPOut = psdFindEndpoint(ncm->ncm_Interface, NULL,
-                                         EA_IsIn, FALSE,
-                                         EA_TransferType, USEAF_BULK,
-                                         TAG_END);
-        if(!(ncm->ncm_EPIn && ncm->ncm_EPOut))
+        if(ncm->ncm_TPType == MS_PROTO_UAS)
         {
-            psdAddErrorMsg(RETURN_FAIL, (STRPTR) GM_UNIQUENAME(libname), "IN or OUT endpoint missing!");
-            break;
+            ncm->ncm_EPInt = NULL;
+            if(!nUasCollectEndpoints(ncm))
+            {
+                psdAddErrorMsg(RETURN_FAIL, (STRPTR) GM_UNIQUENAME(libname), "UAS endpoints missing or incomplete!");
+                break;
+            }
+        } else {
+            ncm->ncm_EPInt = psdFindEndpoint(ncm->ncm_Interface, NULL,
+                                             EA_IsIn, TRUE,
+                                             EA_TransferType, USEAF_INTERRUPT,
+                                             TAG_END);
+            ncm->ncm_EPIn = psdFindEndpoint(ncm->ncm_Interface, NULL,
+                                            EA_IsIn, TRUE,
+                                            EA_TransferType, USEAF_BULK,
+                                            TAG_END);
+            ncm->ncm_EPOut = psdFindEndpoint(ncm->ncm_Interface, NULL,
+                                             EA_IsIn, FALSE,
+                                             EA_TransferType, USEAF_BULK,
+                                             TAG_END);
+            if(!(ncm->ncm_EPIn && ncm->ncm_EPOut))
+            {
+                psdAddErrorMsg(RETURN_FAIL, (STRPTR) GM_UNIQUENAME(libname), "IN or OUT endpoint missing!");
+                break;
+            }
         }
         if((!ncm->ncm_EPInt) && (ncm->ncm_TPType == MS_PROTO_CBI))
         {
             psdAddErrorMsg(RETURN_FAIL, (STRPTR) GM_UNIQUENAME(libname), "INT endpoint missing!");
             break;
-        } else {
+        } else if(ncm->ncm_EPOut) {
             psdGetAttrs(PGA_ENDPOINT, ncm->ncm_EPOut,
                         EA_EndpointNum, &epnum,
                         TAG_END);
             ncm->ncm_EPIntNum = epnum;
         }
-        psdGetAttrs(PGA_ENDPOINT, ncm->ncm_EPIn,
-                    EA_EndpointNum, &epnum,
-                    TAG_END);
-        ncm->ncm_EPInNum = epnum;
-        psdGetAttrs(PGA_ENDPOINT, ncm->ncm_EPOut,
-                    EA_EndpointNum, &epnum,
-                    TAG_END);
-        ncm->ncm_EPOutNum = epnum;
+        if(ncm->ncm_EPIn)
+        {
+            psdGetAttrs(PGA_ENDPOINT, ncm->ncm_EPIn,
+                        EA_EndpointNum, &epnum,
+                        TAG_END);
+            ncm->ncm_EPInNum = epnum;
+        }
+        if(ncm->ncm_EPOut)
+        {
+            psdGetAttrs(PGA_ENDPOINT, ncm->ncm_EPOut,
+                        EA_EndpointNum, &epnum,
+                        TAG_END);
+            ncm->ncm_EPOutNum = epnum;
+        }
+        if(ncm->ncm_TPType == MS_PROTO_UAS)
+        {
+            if(ncm->ncm_EPCmd)
+            {
+                psdGetAttrs(PGA_ENDPOINT, ncm->ncm_EPCmd,
+                            EA_EndpointNum, &epnum,
+                            TAG_END);
+                ncm->ncm_EPCmdNum = epnum;
+            }
+            if(ncm->ncm_EPStatus)
+            {
+                psdGetAttrs(PGA_ENDPOINT, ncm->ncm_EPStatus,
+                            EA_EndpointNum, &epnum,
+                            TAG_END);
+                ncm->ncm_EPStatusNum = epnum;
+            }
+        }
 
         ncm->ncm_BulkResetBorks = FALSE;
         ncm->ncm_GeoChangeCount = 0xffffffff;
@@ -1456,6 +1745,27 @@ struct NepClassMS * GM_UNIQUENAME(nAllocMS)(void)
                 {
                     if((ncm->ncm_EPInPipe = psdAllocPipe(ncm->ncm_Device, ncm->ncm_TaskMsgPort, ncm->ncm_EPIn)))
                     {
+                        if(ncm->ncm_TPType == MS_PROTO_UAS)
+                        {
+                            if(!(ncm->ncm_EPCmdPipe = psdAllocPipe(ncm->ncm_Device, ncm->ncm_TaskMsgPort, ncm->ncm_EPCmd)))
+                            {
+                                psdFreePipe(ncm->ncm_EPInPipe);
+                                psdFreePipe(ncm->ncm_EPOutPipe);
+                                psdFreePipe(ncm->ncm_EP0Pipe);
+                                DeleteMsgPort(ncm->ncm_TaskMsgPort);
+                                goto alloc_fail;
+                            }
+                            if(!(ncm->ncm_EPStatusPipe = psdAllocPipe(ncm->ncm_Device, ncm->ncm_TaskMsgPort, ncm->ncm_EPStatus)))
+                            {
+                                psdFreePipe(ncm->ncm_EPCmdPipe);
+                                ncm->ncm_EPCmdPipe = NULL;
+                                psdFreePipe(ncm->ncm_EPInPipe);
+                                psdFreePipe(ncm->ncm_EPOutPipe);
+                                psdFreePipe(ncm->ncm_EP0Pipe);
+                                DeleteMsgPort(ncm->ncm_TaskMsgPort);
+                                goto alloc_fail;
+                            }
+                        }
                         if(ncm->ncm_CDC->cdc_NakTimeout)
                         {
                             psdSetAttrs(PGA_PIPE, ncm->ncm_EP0Pipe,
@@ -1470,10 +1780,40 @@ struct NepClassMS * GM_UNIQUENAME(nAllocMS)(void)
                                         PPA_NakTimeout, TRUE,
                                         PPA_NakTimeoutTime, ncm->ncm_CDC->cdc_NakTimeout*100,
                                         TAG_END);
+                            if(ncm->ncm_EPCmdPipe)
+                            {
+                                psdSetAttrs(PGA_PIPE, ncm->ncm_EPCmdPipe,
+                                            PPA_NakTimeout, TRUE,
+                                            PPA_NakTimeoutTime, ncm->ncm_CDC->cdc_NakTimeout*100,
+                                            TAG_END);
+                            }
+                            if(ncm->ncm_EPStatusPipe)
+                            {
+                                psdSetAttrs(PGA_PIPE, ncm->ncm_EPStatusPipe,
+                                            PPA_NakTimeout, TRUE,
+                                            PPA_NakTimeoutTime, ncm->ncm_CDC->cdc_NakTimeout*100,
+                                            TAG_END);
+                            }
                         }
                         psdSetAttrs(PGA_PIPE, ncm->ncm_EPOutPipe,
                                     PPA_NoShortPackets, TRUE,
                                     TAG_END);
+                        if(ncm->ncm_EPCmdPipe)
+                        {
+                            psdSetAttrs(PGA_PIPE, ncm->ncm_EPCmdPipe,
+                                        PPA_NoShortPackets, TRUE,
+                                        TAG_END);
+                        }
+                        if(ncm->ncm_EPStatusPipe)
+                        {
+                            psdSetAttrs(PGA_PIPE, ncm->ncm_EPStatusPipe,
+                                        PPA_AllowRuntPackets, TRUE,
+                                        TAG_END);
+                        }
+                        if(ncm->ncm_TPType == MS_PROTO_UAS)
+                        {
+                            nUasInitStreams(ncm);
+                        }
                         if(ncm->ncm_EPInt)
                         {
                             if((ncm->ncm_EPIntPipe = psdAllocPipe(ncm->ncm_Device, ncm->ncm_TaskMsgPort, ncm->ncm_EPInt)))
@@ -1492,6 +1832,8 @@ struct NepClassMS * GM_UNIQUENAME(nAllocMS)(void)
                             ncm->ncm_Task = thistask;
                             return(ncm);
                         }
+                        psdFreePipe(ncm->ncm_EPStatusPipe);
+                        psdFreePipe(ncm->ncm_EPCmdPipe);
                         psdFreePipe(ncm->ncm_EPInPipe);
                     }
                     psdFreePipe(ncm->ncm_EPOutPipe);
@@ -1500,6 +1842,7 @@ struct NepClassMS * GM_UNIQUENAME(nAllocMS)(void)
             }
             DeleteMsgPort(ncm->ncm_TaskMsgPort);
         }
+alloc_fail:
         FreeSignal((LONG) ncm->ncm_Unit.unit_MsgPort.mp_SigBit);
     } while(FALSE);
     CloseLibrary(ncm->ncm_Base);
@@ -1530,7 +1873,10 @@ void GM_UNIQUENAME(nFreeMS)(struct NepClassMS *ncm)
     }
     Permit();
 
+    nUasDisableStreams(ncm);
     psdFreePipe(ncm->ncm_EPIntPipe);
+    psdFreePipe(ncm->ncm_EPStatusPipe);
+    psdFreePipe(ncm->ncm_EPCmdPipe);
     psdFreePipe(ncm->ncm_EPInPipe);
     psdFreePipe(ncm->ncm_EPOutPipe);
     psdFreePipe(ncm->ncm_EP0Pipe);
@@ -1684,7 +2030,26 @@ LONG nGetBlockSize(struct NepClassMS *ncm)
     cmd10[7] = 0;
     cmd10[8] = 0;
     cmd10[9] = 0;
-    if((ioerr = nScsiDirect(ncm, &scsicmd)))
+    ioerr = nScsiDirect(ncm, &scsicmd);
+
+    /*
+     * A device coming out of reset answers the first command that reaches
+     * it with a unit attention, and the capacity is exactly the sort of
+     * command that lands there first. That is a "ask me again", not a
+     * failure, so give it a couple more chances before believing it.
+     */
+    if(ioerr)
+    {
+        UWORD retry;
+
+        for(retry = 0; ioerr && (retry < 3); retry++)
+        {
+            psdDelayMS(10);
+            ioerr = nScsiDirect(ncm, &scsicmd);
+        }
+    }
+
+    if(ioerr)
     {
         psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
                        "SCSI_READ_CAPACITY failed: %ld",
@@ -2802,272 +3167,6 @@ LONG nWrite64(struct NepClassMS *ncm, struct IOStdReq *ioreq)
 }
 /* \\\ */
 
-/* /// "nCBIRequestSense()" */
-LONG nCBIRequestSense(struct NepClassMS *ncm, UBYTE *senseptr, ULONG datalen)
-{
-    LONG ioerr;
-    UBYTE sensecmd[12];
-    LONG actual = 0;
-    struct UsbMSCBIStatusWrapper umscsw;
-
-    memset(sensecmd, 0, 12);
-    senseptr[2] = SK_ILLEGAL_REQUEST;
-    sensecmd[0] = SCSI_REQUEST_SENSE;
-    sensecmd[1] = 0x00;
-    sensecmd[2] = 0x00;
-    sensecmd[3] = 0x00;
-    sensecmd[4] = datalen;
-    sensecmd[5] = 0;
-    KPRINTF(2, ("sense command block phase...\n"));
-
-    /*psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                 USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-    ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);*/
-    psdPipeSetup(ncm->ncm_EP0Pipe, URTF_CLASS|URTF_INTERFACE,
-                 UMSR_ADSC, 0, (ULONG) ncm->ncm_UnitIfNum);
-    ioerr = psdDoPipe(ncm->ncm_EP0Pipe, sensecmd, ((ncm->ncm_CSType == MS_ATAPI_SUBCLASS) ||
-                      (ncm->ncm_CSType == MS_FDDATAPI_SUBCLASS) ||
-                      (ncm->ncm_CSType == MS_UFI_SUBCLASS)) ? (ULONG) 12 : (ULONG) 6);
-    if(!ioerr)
-    {
-        if(ncm->ncm_CDC->cdc_PatchFlags & PFF_CLEAR_EP)
-        {
-            psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                         USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-            ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-        }
-
-        KPRINTF(2, ("sense data phase %ld bytes...\n", datalen));
-        ioerr = psdDoPipe(ncm->ncm_EPInPipe, senseptr, datalen);
-        actual = psdGetPipeActual(ncm->ncm_EPInPipe);
-        if(ioerr == UHIOERR_STALL)
-        {
-            psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                         USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-            psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-        }
-        if((!ioerr) || (ioerr == UHIOERR_RUNTPACKET))
-        {
-            KPRINTF(2, ("sense command status phase...\n"));
-            if(ncm->ncm_TPType == MS_PROTO_CBI)
-            {
-                umscsw.bType = 0;
-                umscsw.bValue = USMF_CSW_PHASEERR;
-                ioerr = psdDoPipe(ncm->ncm_EPIntPipe, &umscsw, sizeof(struct UsbMSCBIStatusWrapper));
-                if(ioerr && (ioerr != UHIOERR_RUNTPACKET))
-                {
-                    psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                   "Status interrupt failed: %s (%ld)",
-                                   psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                    return(0);
-                }
-                umscsw.bValue &= USMF_CSW_PERSIST; /* mask out other bits */
-            } else {
-                umscsw.bType = 0;
-                umscsw.bValue = USMF_CSW_PASS;
-                ioerr = 0;
-            }
-            if((!ioerr) || (ioerr == UHIOERR_RUNTPACKET))
-            {
-                KPRINTF(2, ("sense Status:\n"
-                            "  Status   : %02lx\n",
-                            umscsw.bValue));
-                if(umscsw.bValue)
-                {
-                    /*psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                                   "Sense failed: %ld",
-                                   umscsw.bValue);*/
-                    if(umscsw.bValue == USMF_CSW_PHASEERR)
-                    {
-                        return(0);
-                    }
-                } else {
-                    switch(senseptr[2] & SK_MASK)
-                    {
-                        case SK_UNIT_ATTENTION:
-                            if((senseptr[12] == 0x28) ||
-                               (senseptr[12] == 0x3A))
-                            {
-                                ncm->ncm_ChangeCount++;
-                            }
-                            break;
-                    }
-
-                    if((ncm->ncm_CDC->cdc_PatchFlags & PFF_DEBUG) && (senseptr[2] & SK_MASK))
-                    {
-                        psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                                       "Request Sense Key %lx/%02lx/%02lx",
-                                       senseptr[2] & SK_MASK,
-                                       senseptr[12],
-                                       senseptr[13]);
-                    }
-                }
-            } else {
-                psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                              "Sense status failed: %s (%ld)",
-                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-            }
-        } else {
-            psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                           "Sense data failed: %s (%ld)",
-                           psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-        }
-    } else {
-        psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                       "Sense block failed: %s (%ld)",
-                       psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-    }
-    return(actual);
-}
-/* \\\ */
-
-/* /// "nBulkReset()" */
-LONG nBulkReset(struct NepClassMS *ncm)
-{
-    LONG ioerr;
-    LONG ioerr2 = 0;
-    static UBYTE cbiresetcmd12[12] = { 0x1D, 0x04, 0xFF, 0xFF, 0xFF, 0xFF,
-                                       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-    //struct UsbMSCBIStatusWrapper umscsw;
-    //UBYTE sensedata[18];
-    if(ncm->ncm_DenyRequests)
-    {
-        return UHIOERR_TIMEOUT;
-    }
-    KPRINTF(1, ("Bulk Reset\n"));
-    //psdAddErrorMsg(RETURN_OK, (STRPTR) GM_UNIQUENAME(libname), "Bulk Reset...");
-    switch(ncm->ncm_TPType)
-    {
-        case MS_PROTO_BULK:
-            if(!ncm->ncm_BulkResetBorks)
-            {
-                 psdPipeSetup(ncm->ncm_EP0Pipe, URTF_CLASS|URTF_INTERFACE,
-                              UMSR_BULK_ONLY_RESET, 0, (ULONG) ncm->ncm_UnitIfNum);
-                 ioerr2 = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-                 if(ioerr2 == UHIOERR_TIMEOUT)
-                 {
-                     return(ioerr2);
-                 }
-                 if(ioerr2)
-                 {
-                     psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                                    "BULK_ONLY_RESET failed: %s (%ld)",
-                                    psdNumToStr(NTS_IOERR, ioerr2, "unknown"), ioerr2);
-                     ncm->ncm_BulkResetBorks = TRUE;
-                 }
-                 if(ncm->ncm_DenyRequests)
-                 {
-                     return ioerr2;
-                 }
-            }
-            psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                         USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-            ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-            if(ioerr)
-            {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                               "CLEAR_ENDPOINT_HALT %ld failed: %s (%ld)",
-                               ncm->ncm_EPInNum, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-            }
-            if(ncm->ncm_DenyRequests)
-            {
-                return ioerr;
-            }
-            psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                         USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPOutNum);
-            ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-            if(ioerr)
-            {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                               "CLEAR_ENDPOINT_HALT %ld failed: %s (%ld)",
-                               ncm->ncm_EPOutNum, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-            }
-            return(ioerr2 ? ioerr2 : ioerr);
-
-        case MS_PROTO_CBI:
-        case MS_PROTO_CB:
-            psdPipeSetup(ncm->ncm_EP0Pipe, URTF_CLASS|URTF_INTERFACE,
-                         UMSR_ADSC, 0, (ULONG) ncm->ncm_UnitIfNum);
-            ioerr = psdDoPipe(ncm->ncm_EP0Pipe, cbiresetcmd12, 12);
-            if(ioerr)
-            {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                               "CBI_RESET failed: %s (%ld)",
-                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-            }
-            if(ncm->ncm_DenyRequests)
-            {
-                return ioerr;
-            }
-            psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                         USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-            ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-            if(ioerr)
-            {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                               "CLEAR_ENDPOINT_HALT %ld failed: %s (%ld)",
-                               ncm->ncm_EPInNum, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-            }
-            if(ncm->ncm_DenyRequests)
-            {
-                return ioerr;
-            }
-            psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                         USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPOutNum);
-            ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-            if(ioerr)
-            {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                               "CLEAR_ENDPOINT_HALT %ld failed: %s (%ld)",
-                               ncm->ncm_EPOutNum, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-            }
-            //nCBIRequestSense(ncm, sensedata, 18);
-            return(ioerr);
-    }
-    return(0);
-}
-/* \\\ */
-
-/* /// "nBulkClear()" */
-LONG nBulkClear(struct NepClassMS *ncm)
-{
-    LONG ioerr;
-    if(ncm->ncm_DenyRequests)
-    {
-        return UHIOERR_TIMEOUT;
-    }
-    KPRINTF(1, ("Bulk Clear\n"));
-    //psdAddErrorMsg(RETURN_OK, (STRPTR) GM_UNIQUENAME(libname), "Bulk Clear...");
-    psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                 USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-    ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-    if(ioerr == UHIOERR_TIMEOUT)
-    {
-        return(ioerr);
-    }
-    if(ioerr)
-    {
-        psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                       "CLEAR_ENDPOINT_HALT %ld failed: %s (%ld)",
-                       ncm->ncm_EPInNum, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-    }
-    if(ncm->ncm_DenyRequests)
-    {
-        return ioerr;
-    }
-    psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                 USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPOutNum);
-    ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-    if(ioerr)
-    {
-        psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                       "CLEAR_ENDPOINT_HALT %ld failed: %s (%ld)",
-                       ncm->ncm_EPOutNum, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-    }
-    return(ioerr);
-}
-/* \\\ */
-
 /* /// "nScsiDirect()" */
 LONG nScsiDirect(struct NepClassMS *ncm, struct SCSICmd *scsicmd)
 {
@@ -3498,6 +3597,10 @@ LONG nScsiDirect(struct NepClassMS *ncm, struct SCSICmd *scsicmd)
             res = nScsiDirectBulk(ncm, usecmd10 ? &scsicmd10 : scsicmd);
             break;
 
+        case MS_PROTO_UAS:
+            res = nScsiDirectUAS(ncm, usecmd10 ? &scsicmd10 : scsicmd);
+            break;
+
         case MS_PROTO_CB:
         case MS_PROTO_CBI:
             res = nScsiDirectCBI(ncm, usecmd10 ? &scsicmd10 : scsicmd);
@@ -3687,725 +3790,6 @@ LONG nScsiDirect(struct NepClassMS *ncm, struct SCSICmd *scsicmd)
         }
     }
     return(res);
-}
-/* \\\ */
-
-/* /// "nScsiDirectBulk()" */
-LONG nScsiDirectBulk(struct NepClassMS *ncm, struct SCSICmd *scsicmd)
-{
-    LONG ioerr;
-    struct PsdPipe *pp;
-    struct UsbMSCmdBlkWrapper umscbw;
-    struct UsbMSCmdStatusWrapper umscsw;
-    ULONG datalen;
-    LONG rioerr;
-    UWORD retrycnt = 0;
-    UBYTE cmdstrbuf[16*3+2];
-
-    KPRINTF(10, ("\n"));
-
-    GM_UNIQUENAME(nHexString)(scsicmd->scsi_Command, (ULONG) (scsicmd->scsi_CmdLength < 16 ? scsicmd->scsi_CmdLength : 16), cmdstrbuf);
-
-    if(scsicmd->scsi_Flags & 0x80) /* Autoretry */
-    {
-        retrycnt = 1;
-    }
-    umscbw.dCBWSignature = AROS_LONG2LE(0x43425355);
-    scsicmd->scsi_Status = SCSI_GOOD;
-    nLockXFer(ncm);
-    do
-    {
-        KPRINTF(10, ("retrycnt %ld\n",retrycnt));
-        if(ncm->ncm_DenyRequests)
-        {
-            rioerr = HFERR_Phase;
-            break;
-        }
-        /*nBulkReset(ncm);*/
-
-        rioerr = 0;
-
-        /*psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                     USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-        ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);*/
-
-        if(ncm->ncm_CDC->cdc_PatchFlags & PFF_DELAY_DATA)
-        {
-            psdDelayMS(1);
-        }
-
-        datalen = scsicmd->scsi_Length;
-        umscbw.dCBWTag = (IPTR) scsicmd + ++ncm->ncm_TagCount;
-        umscbw.dCBWDataTransferLength = AROS_LONG2LE(datalen);
-        umscbw.bmCBWFlags = scsicmd->scsi_Flags & SCSIF_READ ? 0x80 : 0x00;
-        umscbw.bCBWLUN = ncm->ncm_UnitLUN;
-        if((scsicmd->scsi_CmdLength) >= 16)
-        {
-            CopyMemQuick(scsicmd->scsi_Command, umscbw.CBWCB, 16);
-            umscbw.bCBWCBLength = scsicmd->scsi_CmdActual = 16;
-        } else {
-            memset(umscbw.CBWCB, 0, 16);
-            CopyMem(scsicmd->scsi_Command, umscbw.CBWCB, (ULONG) scsicmd->scsi_CmdLength);
-            umscbw.bCBWCBLength = scsicmd->scsi_CmdActual = scsicmd->scsi_CmdLength;
-        }
-        //psdAddErrorMsg(RETURN_OK, (STRPTR) GM_UNIQUENAME(libname), "Issueing command %s Dlen=%ld", cmdstrbuf, datalen);
-
-        KPRINTF(2, ("command block phase, tag %08lx, len %ld, flags %02lx...\n",
-                umscbw.dCBWTag, scsicmd->scsi_CmdLength, scsicmd->scsi_Flags));
-        KPRINTF(2, ("command: %s\n", cmdstrbuf));
-        ioerr = psdDoPipe(ncm->ncm_EPOutPipe, &umscbw, UMSCBW_SIZEOF);
-        if(ioerr == UHIOERR_STALL) /* Retry on stall */
-        {
-            KPRINTF(2, ("stall...\n"));
-            nBulkClear(ncm);
-            ioerr = psdDoPipe(ncm->ncm_EPOutPipe, &umscbw, UMSCBW_SIZEOF);
-        }
-        if(ncm->ncm_DenyRequests)
-        {
-            rioerr = HFERR_Phase;
-            break;
-        }
-        if(!ioerr)
-        {
-            if(datalen)
-            {
-                KPRINTF(2, ("data phase %ld bytes...\n", datalen));
-                if(ncm->ncm_CDC->cdc_PatchFlags & PFF_DELAY_DATA)
-                {
-                    psdDelayMS(1);
-                }
-                pp = (scsicmd->scsi_Flags & SCSIF_READ) ? ncm->ncm_EPInPipe : ncm->ncm_EPOutPipe;
-                ioerr = psdDoPipe(pp, scsicmd->scsi_Data, datalen);
-                scsicmd->scsi_Actual = psdGetPipeActual(pp);
-                if(ioerr == UHIOERR_OVERFLOW)
-                {
-                    KPRINTF(10, ("Extra Data received, but ignored!\n"));
-                    ioerr = 0;
-                }
-                else if(ioerr == UHIOERR_STALL) /* Accept on stall */
-                {
-                    KPRINTF(2, ("stall...\n"));
-                    psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                                 USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT,
-                                 (ULONG) ((scsicmd->scsi_Flags & SCSIF_READ) ? ncm->ncm_EPInNum|URTF_IN : ncm->ncm_EPOutNum));
-                    ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-                }
-                else if(ioerr == UHIOERR_RUNTPACKET)
-                {
-                    KPRINTF(10, ("Runt packet ignored...\n"));
-                    ioerr = 0;
-                    /*psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                                 USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT,
-                                 (ULONG) ncm->ncm_EPInNum|URTF_IN);
-                    ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);*/
-                }
-            } else {
-                ioerr = 0;
-                scsicmd->scsi_Actual = 0;
-            }
-            if(!ioerr)
-            {
-                KPRINTF(2, ("command status phase...\n"));
-                ioerr = psdDoPipe(ncm->ncm_EPInPipe, &umscsw, UMSCSW_SIZEOF);
-                if(ioerr == UHIOERR_STALL) /* Retry on stall */
-                {
-                    KPRINTF(2, ("stall...\n"));
-                    psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                                 USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-                    ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-                    /*nBulkClear(ncm);*/
-                    ioerr = psdDoPipe(ncm->ncm_EPInPipe, &umscsw, UMSCSW_SIZEOF);
-                }
-                if(ioerr == UHIOERR_RUNTPACKET)
-                {
-                    // well, retry then
-                    psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                                   "Command status block truncated (%ld bytes), retrying...",
-                                   psdGetPipeActual(ncm->ncm_EPInPipe));
-                    ioerr = psdDoPipe(ncm->ncm_EPInPipe, &umscsw, UMSCSW_SIZEOF);
-                }
-                if(ioerr == UHIOERR_OVERFLOW)
-                {
-                    KPRINTF(10, ("Extra Status received, but ignored!\n"));
-                    ioerr = 0;
-                }
-                if(ncm->ncm_DenyRequests)
-                {
-                    rioerr = HFERR_Phase;
-                    break;
-                }
-                if(!ioerr)
-                {
-                    KPRINTF(2, ("Status:\n"
-                                "  Signature: %08lx\n"
-                                "  Tag      : %08lx\n"
-                                "  Residue  : %08lx\n"
-                                "  Status   : %02lx\n",
-                                umscsw.dCSWSignature,
-                                umscsw.dCSWTag,
-                                umscsw.dCSWDataResidue,
-                                umscsw.bCSWStatus));
-                    if(((umscsw.dCSWSignature != AROS_LONG2LE(0x53425355)) && (!(ncm->ncm_CDC->cdc_PatchFlags & PFF_CSS_BROKEN))) || (umscsw.dCSWTag != umscbw.dCBWTag))
-                    {
-                        psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname), "Command (%s) failed:", cmdstrbuf);
-                        psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                       "Illegal command status block (Sig:%08lx, Tag=%08lx/%08lx (TX/RX), Len=%ld)",
-                                       umscsw.dCSWSignature,
-                                       umscbw.dCBWTag,
-                                       umscsw.dCSWTag,
-                                       psdGetPipeActual(ncm->ncm_EPInPipe));
-                        scsicmd->scsi_Status = SCSI_CHECK_CONDITION;
-                        rioerr = HFERR_Phase;
-                        nBulkReset(ncm);
-                        continue;
-                    }
-                    /* ignore this: too many firmwares report shit */
-                    //scsicmd->scsi_Actual = datalen - AROS_LONG2LE(umscsw.dCSWDataResidue);
-                    if((scsicmd->scsi_Actual > 7) && ((AROS_LONG2BE(*((ULONG *) scsicmd->scsi_Data))>>8) == 0x555342) && (((ULONG *) scsicmd->scsi_Data)[1] == umscbw.dCBWTag))
-                    {
-                        psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                       "Your MSD has a very bad firmware! Havoc!");
-                        scsicmd->scsi_Actual = 0;
-                        umscsw.bCSWStatus = USMF_CSW_FAIL;
-                    }
-                    scsicmd->scsi_Status = umscsw.bCSWStatus;
-                    if(umscsw.bCSWStatus)
-                    {
-                        if(umscsw.bCSWStatus == USMF_CSW_PHASEERR)
-                        {
-                            psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname), "Command (%s) failed: %ld", cmdstrbuf, umscsw.bCSWStatus);
-                            nBulkReset(ncm);
-                        }
-                        /* Autosensing required? */
-                        if(scsicmd->scsi_Flags & SCSIF_AUTOSENSE)
-                        {
-                            /*nBulkClear(ncm);*/
-
-                            datalen = scsicmd->scsi_SenseLength;
-                            umscbw.dCBWTag = (IPTR) scsicmd + ++ncm->ncm_TagCount;
-                            umscbw.dCBWDataTransferLength = AROS_LONG2LE(datalen);
-                            umscbw.bmCBWFlags = 0x80;
-                            /*umscbw.bCBWLUN = ncm->ncm_UnitLun;*/
-                            umscbw.bCBWCBLength = 6;
-                            umscbw.CBWCB[0] = SCSI_REQUEST_SENSE;
-                            umscbw.CBWCB[1] = 0x00;
-                            umscbw.CBWCB[2] = 0x00;
-                            umscbw.CBWCB[3] = 0x00;
-                            umscbw.CBWCB[4] = datalen;
-                            umscbw.CBWCB[5] = 0;
-                            KPRINTF(2, ("sense command block phase...\n"));
-                            ioerr = psdDoPipe(ncm->ncm_EPOutPipe, &umscbw, UMSCBW_SIZEOF);
-                            if(ioerr == UHIOERR_STALL) /* Retry on stall */
-                            {
-                                KPRINTF(2, ("stall...\n"));
-                                nBulkClear(ncm);
-                                ioerr = psdDoPipe(ncm->ncm_EPOutPipe, &umscbw, UMSCBW_SIZEOF);
-                            }
-                            if(!ioerr)
-                            {
-                                KPRINTF(2, ("sense data phase %ld bytes...\n", datalen));
-                                if(ncm->ncm_CDC->cdc_PatchFlags & PFF_DELAY_DATA)
-                                {
-                                    psdDelayMS(1);
-                                }
-                                ioerr = psdDoPipe(ncm->ncm_EPInPipe, scsicmd->scsi_SenseData, datalen);
-                                scsicmd->scsi_SenseActual = psdGetPipeActual(ncm->ncm_EPInPipe);
-                                if(ioerr == UHIOERR_STALL) /* Accept on stall */
-                                {
-                                    psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                                                 USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-                                    ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-                                }
-                                if((ioerr == UHIOERR_RUNTPACKET) || (ioerr == UHIOERR_OVERFLOW))
-                                {
-                                    KPRINTF(10, ("Extra or less data received, but ignored!\n"));
-                                    ioerr = 0;
-                                }
-
-                                if(!ioerr)
-                                {
-                                    if(ncm->ncm_CDC->cdc_PatchFlags & PFF_DELAY_DATA)
-                                    {
-                                        psdDelayMS(1);
-                                    }
-                                    KPRINTF(2, ("sense command status phase...\n"));
-                                    ioerr = psdDoPipe(ncm->ncm_EPInPipe, &umscsw, UMSCSW_SIZEOF);
-                                    if(ioerr == UHIOERR_STALL) /* Retry on stall */
-                                    {
-                                        KPRINTF(2, ("stall...\n"));
-                                        psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                                                     USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT, (ULONG) ncm->ncm_EPInNum|URTF_IN);
-                                        ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-                                        ioerr |= psdDoPipe(ncm->ncm_EPInPipe, &umscsw, UMSCSW_SIZEOF);
-                                    }
-                                    if(ioerr == UHIOERR_RUNTPACKET)
-                                    {
-                                        // well, retry then
-                                        psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                                                          "Command (sense) status block truncated (%ld bytes), retrying...",
-                                                          psdGetPipeActual(ncm->ncm_EPInPipe));
-                                        ioerr = psdDoPipe(ncm->ncm_EPInPipe, &umscsw, UMSCSW_SIZEOF);
-                                    }
-
-                                    if(ioerr == UHIOERR_OVERFLOW)
-                                    {
-                                        KPRINTF(10, ("Extra Status received, but ignored!\n"));
-                                        ioerr = 0;
-                                    }
-                                    if(!ioerr)
-                                    {
-                                        KPRINTF(2, ("sense Status:\n"
-                                                    "  Signature: %08lx\n"
-                                                    "  Tag      : %08lx\n"
-                                                    "  Residue  : %08lx\n"
-                                                    "  Status   : %02lx\n",
-                                                    umscsw.dCSWSignature,
-                                                    umscsw.dCSWTag,
-                                                    umscsw.dCSWDataResidue,
-                                                    umscsw.bCSWStatus));
-                                        if(((umscsw.dCSWSignature != AROS_LONG2LE(0x53425355)) && (!(ncm->ncm_CDC->cdc_PatchFlags & PFF_CSS_BROKEN))) || (umscsw.dCSWTag != umscbw.dCBWTag))
-                                        {
-                                            psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                                          "Illegal command (sense) status block (Sig:%08lx, Tag=%08lx/%08lx (TX/RX), Len=%ld)",
-                                                          umscsw.dCSWSignature,
-                                                          umscbw.dCBWTag,
-                                                          umscsw.dCSWTag,
-                                                          psdGetPipeActual(ncm->ncm_EPInPipe));
-                                            scsicmd->scsi_Status = SCSI_CHECK_CONDITION;
-                                            rioerr = HFERR_Phase;
-                                            nBulkReset(ncm);
-                                            continue;
-                                        }
-                                        /* ignore this: too many firmwares report shit */
-                                        //scsicmd->scsi_SenseActual = datalen - AROS_LONG2LE(umscsw.dCSWDataResidue);
-                                        if((scsicmd->scsi_SenseActual > 7) && ((AROS_LONG2BE(*((ULONG *) scsicmd->scsi_SenseData))>>8) == 0x555342) && (((ULONG *) scsicmd->scsi_SenseData)[1] == umscbw.dCBWTag))
-                                        {
-                                            psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                                          "Your MSD has a very bad firmware! Havoc!");
-                                            scsicmd->scsi_Actual = 0;
-                                            umscsw.bCSWStatus = USMF_CSW_FAIL;
-                                        }
-
-                                        if(umscsw.bCSWStatus)
-                                        {
-                                            /*psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                                                           "Sense failed: %ld",
-                                                           umscsw.bCSWStatus);*/
-                                            if(umscsw.bCSWStatus == USMF_CSW_PHASEERR)
-                                            {
-                                                nBulkReset(ncm);
-                                            }
-                                        } else {
-                                            switch(scsicmd->scsi_SenseData[2] & SK_MASK)
-                                            {
-                                                case SK_ILLEGAL_REQUEST:
-                                                case SK_NOT_READY:
-                                                    retrycnt = 0;
-                                                    break;
-                                                case SK_DATA_PROTECT:
-                                                    if(!ncm->ncm_WriteProtect)
-                                                    {
-                                                        ncm->ncm_WriteProtect = TRUE;
-                                                        if(ncm->ncm_CDC->cdc_PatchFlags & PFF_DEBUG)
-                                                        {
-                                                            psdAddErrorMsg(RETURN_OK, (STRPTR) GM_UNIQUENAME(libname),
-                                                                           "WriteProtect On: Sense Data Protect");
-                                                        }
-                                                    }
-                                                    break;
-
-                                                case SK_UNIT_ATTENTION:
-                                                    if((ncm->ncm_CDC->cdc_PatchFlags & PFF_REM_SUPPORT) &&
-                                                       ((scsicmd->scsi_SenseData[12] == 0x28) ||
-                                                       (scsicmd->scsi_SenseData[12] == 0x3A)))
-                                                    {
-                                                        ncm->ncm_ChangeCount++;
-                                                        if(ncm->ncm_CDC->cdc_PatchFlags & PFF_DEBUG)
-                                                        {
-                                                            psdAddErrorMsg(RETURN_OK, (STRPTR) GM_UNIQUENAME(libname),
-                                                                           "Diskchange: Unit Attention (count = %ld)",
-                                                                           ncm->ncm_ChangeCount);
-                                                        }
-                                                    }
-                                                    break;
-                                            }
-                                            KPRINTF(10, ("Sense Key: %lx/%02lx/%02lx\n",
-                                                        scsicmd->scsi_SenseData[2] & SK_MASK,
-                                                        scsicmd->scsi_SenseData[12],
-                                                        scsicmd->scsi_SenseData[13]));
-                                            if(ncm->ncm_CDC->cdc_PatchFlags & PFF_DEBUG)
-                                            {
-                                                psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                                                               "Cmd %s: Sense Key %lx/%02lx/%02lx",
-                                                               cmdstrbuf,
-                                                               scsicmd->scsi_SenseData[2] & SK_MASK,
-                                                               scsicmd->scsi_SenseData[12],
-                                                               scsicmd->scsi_SenseData[13]);
-                                            }
-                                        }
-                                    } else {
-                                        KPRINTF(10, ("Sense status failed: %s (%ld)\n", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr));
-                                        psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname), "Command (%s) okay, but:", cmdstrbuf);
-                                        psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                                       "Sense status failed: %s (%ld)",
-                                                       psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                                        nBulkReset(ncm);
-                                    }
-                                } else {
-                                    KPRINTF(10, ("Sense data failed: %s (%ld)\n", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr));
-                                    psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname), "Command (%s) okay, but:", cmdstrbuf);
-                                    psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                                   "Sense data failed: %s (%ld)",
-                                                   psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                                    nBulkReset(ncm);
-                                }
-                            } else {
-                                KPRINTF(10, ("Sense block failed: %s (%ld)\n", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr));
-                                psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname), "Command (%s) okay, but:", cmdstrbuf);
-                                psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                               "Sense block failed: %s (%ld)",
-                                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                                /*nBulkReset(ncm);*/
-                            }
-                        }
-                        rioerr = HFERR_BadStatus;
-                    }
-                } else {
-                    KPRINTF(10, ("Command status failed: %s (%ld)\n", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr));
-                    psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname), "Command (%s) failed:", cmdstrbuf);
-                    psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                  "Command status failed: %s (%ld)",
-                                   psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                    scsicmd->scsi_Status = SCSI_CHECK_CONDITION;
-                    rioerr = HFERR_Phase;
-                    nBulkReset(ncm);
-                }
-            } else {
-                KPRINTF(10, ("Data phase failed: %s (%ld)\n", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr));
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname), "Command (%s) failed:", cmdstrbuf);
-                psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                               "Data phase failed: %s (%ld)",
-                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                scsicmd->scsi_Status = SCSI_CHECK_CONDITION;
-                rioerr = HFERR_Phase;
-                nBulkReset(ncm);
-            }
-        } else {
-            KPRINTF(10, ("Command block failed: %s (%ld)\n", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr));
-            scsicmd->scsi_Status = SCSI_CHECK_CONDITION;
-            rioerr = HFERR_Phase;
-            if(ioerr == UHIOERR_TIMEOUT)
-            {
-                break;
-            }
-            psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname), "Command (%s) failed:", cmdstrbuf);
-            psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                           "Command block failed: %s (%ld)",
-                           psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-            nBulkReset(ncm);
-        }
-        if(!rioerr)
-        {
-            break;
-        }
-        KPRINTF(1, ("Retrying...\n"));
-    } while(retrycnt--);
-    nUnlockXFer(ncm);
-    return(rioerr);
-}
-/* \\\ */
-
-/* /// "nScsiDirectCBI()" */
-LONG nScsiDirectCBI(struct NepClassMS *ncm, struct SCSICmd *scsicmd)
-{
-    LONG ioerr;
-    struct PsdPipe *pp;
-    struct PsdPipe *backpp;
-    struct UsbMSCBIStatusWrapper umscsw;
-    ULONG datalen;
-    LONG rioerr;
-    UWORD retrycnt = 0;
-    UBYTE sensedata[18];
-    UBYTE *senseptr;
-    UBYTE asc;
-    BOOL datadone;
-    BOOL statusdone;
-    UBYTE cmdstrbuf[16*3+2];
-
-    GM_UNIQUENAME(nHexString)(scsicmd->scsi_Command, (ULONG) (scsicmd->scsi_CmdLength < 16 ? scsicmd->scsi_CmdLength : 16), cmdstrbuf);
-
-    if(scsicmd->scsi_Flags & 0x80) /* Autoretry */
-    {
-        retrycnt = 1;
-    }
-    scsicmd->scsi_Status = SCSI_GOOD;
-    nLockXFer(ncm);
-    do
-    {
-        if(ncm->ncm_DenyRequests)
-        {
-            rioerr = HFERR_Phase;
-            break;
-        }
-        rioerr = 0;
-        datalen = scsicmd->scsi_Length;
-
-        KPRINTF(2, ("command block phase, tag %08lx, len %ld, flags %02lx...\n",
-                scsicmd, scsicmd->scsi_CmdLength, scsicmd->scsi_Flags));
-
-        KPRINTF(2, ("command: %s\n", cmdstrbuf));
-
-        //nBulkClear(ncm);
-        scsicmd->scsi_CmdActual = scsicmd->scsi_CmdLength;
-        /*if(datalen)
-        {
-            psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                         USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT,
-                         (ULONG) ((scsicmd->scsi_Flags & SCSIF_READ) ? ncm->ncm_EPInNum|URTF_IN : ncm->ncm_EPOutNum));
-            ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-        }*/
-        psdPipeSetup(ncm->ncm_EP0Pipe, URTF_CLASS|URTF_INTERFACE,
-                     UMSR_ADSC, 0, (ULONG) ncm->ncm_UnitIfNum);
-        ioerr = psdDoPipe(ncm->ncm_EP0Pipe, scsicmd->scsi_Command, (ULONG) scsicmd->scsi_CmdLength);
-
-        if(ncm->ncm_DenyRequests)
-        {
-            rioerr = HFERR_Phase;
-            break;
-        }
-        if(!ioerr)
-        {
-            datadone = statusdone = FALSE;
-            if(datalen)
-            {
-                if(ncm->ncm_CDC->cdc_PatchFlags & PFF_CLEAR_EP)
-                {
-                    psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                                 USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT,
-                                 (ULONG) ((scsicmd->scsi_Flags & SCSIF_READ) ? ncm->ncm_EPInNum|URTF_IN : ncm->ncm_EPOutNum));
-                    ioerr = psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-                }
-
-                KPRINTF(2, ("data phase %ld bytes...\n", datalen));
-                pp = (scsicmd->scsi_Flags & SCSIF_READ) ? ncm->ncm_EPInPipe : ncm->ncm_EPOutPipe;
-
-                if(ncm->ncm_TPType == MS_PROTO_CBI)
-                {
-                    /* okay, this is a major pain in the arse.
-                       we have to do this asynchroneously */
-                    umscsw.bType = 0;
-                    umscsw.bValue = USMF_CSW_PHASEERR;
-                    psdSendPipe(ncm->ncm_EPIntPipe, &umscsw, sizeof(struct UsbMSCBIStatusWrapper));
-                    psdSendPipe(pp, scsicmd->scsi_Data, datalen);
-                    do
-                    {
-                        WaitPort(ncm->ncm_TaskMsgPort);
-                        while((backpp = (struct PsdPipe *) GetMsg(ncm->ncm_TaskMsgPort)))
-                        {
-                            if(backpp == pp)
-                            {
-                                /* data transfer finished */
-                                datadone = TRUE;
-                            }
-                            else if(backpp == ncm->ncm_EPIntPipe)
-                            {
-                                /* status returned */
-                                statusdone = TRUE;
-                            }
-                        }
-                    } while(!statusdone);
-                    if(!datadone)
-                    {
-                        psdAbortPipe(pp);
-                        psdWaitPipe(pp);
-                        ioerr = 0;
-                    } else {
-                        ioerr = psdGetPipeError(pp);
-                    }
-
-                } else {
-                    ioerr = psdDoPipe(pp, scsicmd->scsi_Data, datalen);
-                }
-
-                scsicmd->scsi_Actual = psdGetPipeActual(pp);
-                if(ioerr == UHIOERR_OVERFLOW)
-                {
-                    KPRINTF(10, ("Extra Data received, but ignored!\n"));
-                    ioerr = 0;
-                }
-                if(ioerr == UHIOERR_STALL) /* Accept on stall */
-                {
-                    KPRINTF(2, ("stall...\n"));
-                    //nBulkClear(ncm);
-                    psdPipeSetup(ncm->ncm_EP0Pipe, URTF_STANDARD|URTF_ENDPOINT,
-                                 USR_CLEAR_FEATURE, UFS_ENDPOINT_HALT,
-                                 (ULONG) ((scsicmd->scsi_Flags & SCSIF_READ) ? ncm->ncm_EPInNum|URTF_IN : ncm->ncm_EPOutNum));
-                    psdDoPipe(ncm->ncm_EP0Pipe, NULL, 0);
-                    ioerr = 0;
-                }
-            } else {
-                ioerr = 0;
-                scsicmd->scsi_Actual = 0;
-            }
-            if((!ioerr) || (ioerr == UHIOERR_RUNTPACKET))
-            {
-                KPRINTF(2, ("command status phase...\n"));
-                if(ncm->ncm_TPType == MS_PROTO_CBI)
-                {
-                    if(!statusdone)
-                    {
-                        if(ncm->ncm_CSType == MS_UFI_SUBCLASS)
-                        {
-                            umscsw.bType = 0x04;
-                            umscsw.bValue = 0;
-                        } else {
-                            umscsw.bType = 0;
-                            umscsw.bValue = USMF_CSW_PHASEERR;
-                        }
-                        ioerr = psdDoPipe(ncm->ncm_EPIntPipe, &umscsw, sizeof(struct UsbMSCBIStatusWrapper));
-                    } else {
-                        ioerr = psdGetPipeError(ncm->ncm_EPIntPipe);
-                    }
-                    umscsw.bValue &= 0x0f; /* mask out upper nibble */
-                    if(ioerr)
-                    {
-                        psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                       "Status interrupt failed: %s (%ld)",
-                                       psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                        nBulkReset(ncm);
-                    }
-                    if(ncm->ncm_CSType == MS_UFI_SUBCLASS)
-                    {
-                        asc = umscsw.bType;
-                        if((scsicmd->scsi_Command[0] == SCSI_REQUEST_SENSE) ||
-                           (scsicmd->scsi_Command[0] == SCSI_INQUIRY))
-                        {
-                            umscsw.bType = 0;
-                            umscsw.bValue = USMF_CSW_PASS;
-                        } else {
-                            umscsw.bType = 0;
-                            umscsw.bValue = asc ? USMF_CSW_FAIL : USMF_CSW_PASS;
-                            if(umscsw.bValue)
-                            {
-                                rioerr = HFERR_BadStatus;
-                            }
-                        }
-                    } else {
-                        umscsw.bValue &= USMF_CSW_PERSIST; /* mask out other bits */
-                    }
-                } else {
-                    umscsw.bType = 0;
-                    umscsw.bValue = USMF_CSW_PASS;
-                    ioerr = 0;
-                }
-                if(ncm->ncm_DenyRequests)
-                {
-                    rioerr = HFERR_Phase;
-                    break;
-                }
-                if((!ioerr) || (ioerr == UHIOERR_RUNTPACKET))
-                {
-                    scsicmd->scsi_Status = umscsw.bValue;
-                    if(umscsw.bValue == USMF_CSW_PHASEERR)
-                    {
-                        psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                                       "Command (%s) phase error: %ld",
-                                       cmdstrbuf,
-                                       umscsw.bValue);
-                        nBulkReset(ncm);
-                    }
-                    else if(umscsw.bValue == USMF_CSW_PERSIST)
-                    {
-                        psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname),
-                                       "Command (%s) persistant error: %ld",
-                                       cmdstrbuf,
-                                       umscsw.bValue);
-                        nBulkReset(ncm);
-                    }
-
-                    /* Autosensing required? */
-                    if(((umscsw.bValue && (scsicmd->scsi_Flags & SCSIF_AUTOSENSE))) ||
-                       (ncm->ncm_TPType == MS_PROTO_CB) || (ncm->ncm_TPType == MS_PROTO_CBI))
-                    {
-                        if(scsicmd->scsi_Flags & SCSIF_AUTOSENSE)
-                        {
-                            datalen = scsicmd->scsi_SenseLength;
-                            senseptr = scsicmd->scsi_SenseData;
-                        } else {
-                            datalen = 18;
-                            senseptr = sensedata;
-                        }
-                        if(!(scsicmd->scsi_SenseActual = nCBIRequestSense(ncm, senseptr, datalen)))
-                        {
-                            nBulkReset(ncm);
-                        }
-                        if(senseptr[2] & SK_MASK)
-                        {
-                            rioerr = HFERR_BadStatus;
-                            scsicmd->scsi_Status = SCSI_CHECK_CONDITION;
-                        }
-                    }
-                } else {
-                    psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                                  "Command status failed: %s (%ld)",
-                                   psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                    scsicmd->scsi_Status = SCSI_CHECK_CONDITION;
-                    rioerr = HFERR_Phase;
-                    nBulkReset(ncm);
-                }
-            } else {
-                psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                               "Data phase failed: %s (%ld)",
-                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                scsicmd->scsi_Status = SCSI_CHECK_CONDITION;
-                rioerr = HFERR_Phase;
-                nBulkClear(ncm);
-            }
-        } else {
-            scsicmd->scsi_Status = SCSI_CHECK_CONDITION;
-            rioerr = HFERR_Phase;
-            if(ioerr == UHIOERR_TIMEOUT)
-            {
-                break;
-            }
-            if(ncm->ncm_CDC->cdc_PatchFlags & PFF_DEBUG)
-            {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) GM_UNIQUENAME(libname), "Command (%s) failed:", cmdstrbuf);
-                psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
-                               "Command block failed: %s (%ld)",
-                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-            }
-            if(scsicmd->scsi_Flags & SCSIF_AUTOSENSE)
-            {
-                datalen = scsicmd->scsi_SenseLength;
-                senseptr = scsicmd->scsi_SenseData;
-            } else {
-                datalen = 18;
-                senseptr = sensedata;
-            }
-            if(!(scsicmd->scsi_SenseActual = nCBIRequestSense(ncm, senseptr, datalen)))
-            {
-                nBulkReset(ncm);
-                retrycnt = 0;
-            } else {
-                if(senseptr[2] & SK_MASK)
-                {
-                    rioerr = HFERR_BadStatus;
-                    if((senseptr[2] & SK_MASK) == SK_NOT_READY)
-                    {
-                        retrycnt = 0;
-                    }
-                }
-            }
-        }
-        if(!rioerr)
-        {
-            break;
-        }
-        KPRINTF(1, ("Retrying...\n"));
-    } while(retrycnt--);
-    nUnlockXFer(ncm);
-    return(rioerr);
 }
 /* \\\ */
 
@@ -4747,23 +4131,11 @@ struct NepMSBase * GM_UNIQUENAME(nAllocRT)(void)
 #define ExpansionBase nh->nh_ExpansionBase
 #undef PartitionBase
 #define PartitionBase nh->nh_PartitionBase
+    /* expansion, partition and poseidon are the class's, opened in libInit -
+       acquiring them here could mean waiting on a volume this class is the
+       driver for. */
     do
     {
-        if(!(ExpansionBase = OpenLibrary("expansion.library", 37)))
-        {
-            Alert(AG_OpenLib | AO_ExpansionLib);
-            break;
-        }
-        if(!(PartitionBase = OpenLibrary("partition.library", 1)))
-        {
-            Alert(AG_OpenLib | AO_Unknown);
-            break;
-        }
-        if(!(ps = OpenLibrary("poseidon.library", 4)))
-        {
-            Alert(AG_OpenLib | AO_Unknown);
-            break;
-        }
         if(!(nh->nh_IOMsgPort = CreateMsgPort()))
         {
             break;
@@ -4789,21 +4161,6 @@ struct NepMSBase * GM_UNIQUENAME(nAllocRT)(void)
         nh->nh_RemovableTask = thistask;
         return(nh);
     } while(FALSE);
-    if(ExpansionBase)
-    {
-        CloseLibrary(ExpansionBase);
-        ExpansionBase = NULL;
-    }
-    if(PartitionBase)
-    {
-        CloseLibrary(PartitionBase);
-        PartitionBase = NULL;
-    }
-    if(ps)
-    {
-        CloseLibrary(ps);
-        ps = NULL;
-    }
 
     if(nh->nh_TimerIOReq)
     {
@@ -4847,12 +4204,8 @@ void GM_UNIQUENAME(nFreeRT)(struct NepMSBase *nh)
         CloseLibrary(nh->nh_DOSBase);
         nh->nh_DOSBase = NULL;
     }
-    CloseLibrary(ExpansionBase);
-    ExpansionBase = NULL;
-    CloseLibrary(PartitionBase);
-    PartitionBase = NULL;
-    CloseLibrary(ps);
-    ps = NULL;
+    /* expansion, partition and poseidon belong to the class, not to this
+       task - libInit opened them, libExpunge gives them back. */
 
     AbortIO((struct IORequest *) nh->nh_TimerIOReq);
     WaitIO((struct IORequest *) nh->nh_TimerIOReq);
@@ -5579,7 +4932,7 @@ BOOL MountPartition(struct NepClassMS *ncm, STRPTR dosDevice)
 
             patch.fse_PatchFlags = 0x0080|0x0010;
             patch.fse_SegList = segList;
-            patch.fse_StackSize = (AROS_STACKSIZE << 1);
+            patch.fse_StackSize = (AROS_STACKSIZE << 2);
             //if(((patch.fse_DosType & 0xffffff00) == 0x46415400) || (patch.fse_DosType == 0x4d534800))
             {
                 KPRINTF(10, ("setting up certain fs values for MS-DOS fs\n"));
@@ -5620,7 +4973,7 @@ BOOL MountPartition(struct NepClassMS *ncm, STRPTR dosDevice)
             {
                 BOOL installboot;
                 KPRINTF(10, ("MakeDosNode() succeeded, patchflags %04lx\n", patch.fse_PatchFlags));
-                node->dn_StackSize = (AROS_STACKSIZE << 1);
+                node->dn_StackSize = (AROS_STACKSIZE << 2);
 
                 /*node->dn_Priority = 5;*/
                 if(patch.fse_PatchFlags & 0x0001) node->dn_Type = patch.fse_Type;
@@ -6855,7 +6208,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nGUITask))
                 }
 
                 case ID_ABOUT:
-                    MUI_RequestA(ncm->ncm_App, ncm->ncm_MainWindow, 0, NULL, "Blimey!", VERSION_STRING "\n\nCode for AutoMounting based\non work by Thore Böckelmann.", NULL);
+                    MUI_RequestA(ncm->ncm_App, ncm->ncm_MainWindow, 0, NULL, "Blimey!", VERSION_STRING "\n\nCode for AutoMounting based\non work by Thore BÃ¶ckelmann.", NULL);
                     break;
             }
             if(retid == MUIV_Application_ReturnID_Quit)
@@ -7101,4 +6454,3 @@ AROS_UFH3(LONG, GM_UNIQUENAME(LUNListDisplayHook),
     AROS_USERFUNC_EXIT
 }
 /* \\\ */
-

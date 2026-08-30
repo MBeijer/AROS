@@ -65,6 +65,8 @@ struct PsdRawDoFmt
 
 void pFreeEndpoint(struct PsdEndpoint *pep);
 struct PsdEndpoint * pAllocEndpoint(struct PsdInterface *pif);
+BOOL pPrepareHWEndpoint(struct PsdPipe *pp);
+void pTearDownHWEndpoint(struct PsdEndpoint *pep);
 
 void pFreeInterface(struct PsdInterface *pif);
 struct PsdInterface * pAllocInterface(struct PsdConfig *pc);
@@ -118,6 +120,10 @@ void pPowerRecurseSupply(struct PsdBase *ps, struct PsdDevice *pd);
 
 void pStripString(struct PsdBase *ps, STRPTR str);
 struct Node * pFindName(struct PsdBase *ps, struct List *list, STRPTR name);
+
+UWORD pGetRootPort(struct PsdDevice *pd);
+ULONG pBuildRouteString(struct PsdDevice *pd);
+void pGetTTInfo(struct PsdDevice *pd, UWORD *ttHubAddr, UWORD *ttHubPort, UWORD *thinkTime, BOOL *isMultiTT);
 
 #define psdAddErrorMsg0(level, origin, fmtstr) psdAddErrorMsgA(level, origin, fmtstr, NULL)
 

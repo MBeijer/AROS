@@ -1,13 +1,12 @@
 /*
-    Copyright (C) 2014, The AROS Development Team. All rights reserved.
+    Copyright (C) 2014-2025, The AROS Development Team. All rights reserved.
 
     Desc: SuperSpeed USB3.0 hub for Poseidon (based upon hub.class.c by Chris Hodges <chrisly@platon42.de>)
 */
 
-#ifdef DEBUG
-#undef DEBUG
+#ifndef DEBUG
+#define DEBUG 0
 #endif
-#define DEBUG 1
 
 #include <aros/debug.h>
 
@@ -23,24 +22,24 @@
 
 #include LC_LIBDEFS_FILE
 
-struct NepClassHub * GM_UNIQUENAME(usbAttemptDeviceBinding)(struct NepHubBase *nh, struct PsdDevice *pd);
-struct NepClassHub * GM_UNIQUENAME(usbForceDeviceBinding)(struct NepHubBase * nh, struct PsdDevice *pd);
-void GM_UNIQUENAME(usbReleaseDeviceBinding)(struct NepHubBase *nh, struct NepClassHub *nch);
+struct NepClassHubSS * GM_UNIQUENAME(usbAttemptDeviceBinding)(struct NepHubSSBase *nh, struct PsdDevice *pd);
+struct NepClassHubSS * GM_UNIQUENAME(usbForceDeviceBinding)(struct NepHubSSBase * nh, struct PsdDevice *pd);
+void GM_UNIQUENAME(usbReleaseDeviceBinding)(struct NepHubSSBase *nh, struct NepClassHubSS *nch);
 
-struct NepClassHub * GM_UNIQUENAME(nAllocHub)(void);
-void GM_UNIQUENAME(nFreeHub)(struct NepClassHub *nch);
-struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHub *nch, UWORD port);
-LONG GM_UNIQUENAME(nClearPortStatus)(struct NepClassHub *nch, UWORD port);
-BOOL GM_UNIQUENAME(nHubSuspendDevice)(struct NepClassHub *nch, struct PsdDevice *pd);
-BOOL GM_UNIQUENAME(nHubResumeDevice)(struct NepClassHub *nch, struct PsdDevice *pd);
-void GM_UNIQUENAME(nHandleHubMethod)(struct NepClassHub *nch, struct NepHubMsg *nhm);
+struct NepClassHubSS * GM_UNIQUENAME(nAllocHub)(void);
+void GM_UNIQUENAME(nFreeHub)(struct NepClassHubSS *nch);
+struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHubSS *nch, UWORD port);
+LONG GM_UNIQUENAME(nClearPortStatus)(struct NepClassHubSS *nch, UWORD port);
+BOOL GM_UNIQUENAME(nHubSuspendDevice)(struct NepClassHubSS *nch, struct PsdDevice *pd);
+BOOL GM_UNIQUENAME(nHubResumeDevice)(struct NepClassHubSS *nch, struct PsdDevice *pd);
+void GM_UNIQUENAME(nHandleHubMethod)(struct NepClassHubSS *nch, struct NepHubSSMsg *nhm);
 AROS_UFP0(void, GM_UNIQUENAME(nHubssTask));
 
 /* /// "Lib Stuff" */
 static const STRPTR libname = MOD_NAME_STRING;
 
 static int GM_UNIQUENAME(libInit)(LIBBASETYPEPTR nh) {
-
+    KPRINTF(1, ("%s()\n", __func__));
     NEWLIST(&nh->nh_Bindings);
     InitSemaphore(&nh->nh_Adr0Sema);
 
@@ -58,12 +57,12 @@ ADD2INITLIB(GM_UNIQUENAME(libInit), 0)
  */
 
 /* /// "usbAttemptDeviceBinding()" */
-struct NepClassHub * GM_UNIQUENAME(usbAttemptDeviceBinding)(struct NepHubBase *nh, struct PsdDevice *pd) {
+struct NepClassHubSS * GM_UNIQUENAME(usbAttemptDeviceBinding)(struct NepHubSSBase *nh, struct PsdDevice *pd) {
     struct Library *ps;
     IPTR devclass;
     IPTR issuperspeed = 0;
 
-    //KPRINTF(0, ("usbAttemptDeviceBinding(%p)\n", pd));
+    KPRINTF(1, ("%s(0x%p)\n", __func__, pd));
 
     if((ps = OpenLibrary("poseidon.library", 4))) {
         psdGetAttrs(PGA_DEVICE, pd, DA_Class, &devclass, DA_IsSuperspeed, &issuperspeed, TAG_DONE);
@@ -77,22 +76,23 @@ struct NepClassHub * GM_UNIQUENAME(usbAttemptDeviceBinding)(struct NepHubBase *n
 }
 
 /* /// "usbForceDeviceBinding()" */
-struct NepClassHub * GM_UNIQUENAME(usbForceDeviceBinding)(struct NepHubBase * nh, struct PsdDevice *pd) {
+struct NepClassHubSS * GM_UNIQUENAME(usbForceDeviceBinding)(struct NepHubSSBase * nh, struct PsdDevice *pd) {
     struct Library *ps;
-    struct NepClassHub *nch;
+    struct NepClassHubSS *nch;
     STRPTR devname;
     char buf[64];
     struct Task *tmptask;
 
-    //KPRINTF(0, ("usbForceDeviceBinding(%p)\n", pd));
+    KPRINTF(1, ("%s(0x%p)\n", __func__, pd));
 
     if((ps = OpenLibrary("poseidon.library", 4))) {
         psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_DONE);
 
-        if((nch = psdAllocVec(sizeof(struct NepClassHub)))) {
+        if((nch = psdAllocVec(sizeof(struct NepClassHubSS)))) {
             nch->nch_HubBase = nh;
             nch->nch_Device = pd;
             psdSafeRawDoFmt(buf, 64, "hubss.class<%p>", nch);
+
             nch->nch_ReadySignal = SIGB_SINGLE;
             nch->nch_ReadySigTask = FindTask(NULL);
             SetSignal(0, SIGF_SINGLE);
@@ -125,11 +125,11 @@ struct NepClassHub * GM_UNIQUENAME(usbForceDeviceBinding)(struct NepHubBase * nh
 }
 
 /* /// "usbReleaseDeviceBinding()" */
-void GM_UNIQUENAME(usbReleaseDeviceBinding)(struct NepHubBase *nh, struct NepClassHub *nch) {
+void GM_UNIQUENAME(usbReleaseDeviceBinding)(struct NepHubSSBase *nh, struct NepClassHubSS *nch) {
     struct Library *ps;
     STRPTR devname;
 
-    KPRINTF(1, ("nepHubReleaseDeviceBinding(%p)\n", nch));
+    KPRINTF(1, ("%s(0x%p, 0x%p)\n", __func__, nh, nch));
 
     if((ps = OpenLibrary("poseidon.library", 4))) {
 
@@ -161,20 +161,20 @@ void GM_UNIQUENAME(usbReleaseDeviceBinding)(struct NepHubBase *nh, struct NepCla
 }
 
 /* /// "usbGetAttrsA()" */
-AROS_LH3(LONG, usbGetAttrsA, AROS_LHA(ULONG, type, D0), AROS_LHA(APTR, usbstruct, A0), AROS_LHA(struct TagItem *, taglist, A1), LIBBASETYPEPTR, nh, 5, hub) {
+AROS_LH3(LONG, usbGetAttrsA, AROS_LHA(ULONG, type, D0), AROS_LHA(APTR, usbstruct, A0), AROS_LHA(struct TagItem *, taglist, A1), LIBBASETYPEPTR, nh, 5, hubss) {
     AROS_LIBFUNC_INIT
 
     struct TagItem *ti;
     LONG count = 0;
 
-    KPRINTF(1, ("nepHubGetAttrsA(%ld, %p, %p)\n", type, usbstruct, taglist));
+    KPRINTF(1, ("%s(%ld, 0x%p, 0x%p)\n", __func__, type, usbstruct, taglist));
 
     switch(type) {
         case UGA_CLASS:
             while((ti = LibNextTagItem(&taglist)) != NULL) {
                 switch (ti->ti_Tag) {
                     case UCCA_Priority:
-                        *((SIPTR *) ti->ti_Data) = 0;
+                        *((SIPTR *) ti->ti_Data) = 1;
                         count++;
                         break;
                     case UCCA_Description:
@@ -218,20 +218,24 @@ AROS_LH3(LONG, usbGetAttrsA, AROS_LHA(ULONG, type, D0), AROS_LHA(APTR, usbstruct
 }
 
 /* /// "usbSetAttrsA()" */
-AROS_LH3(LONG, usbSetAttrsA, AROS_LHA(ULONG, type, D0), AROS_LHA(APTR, usbstruct, A0), AROS_LHA(struct TagItem *, tags, A1), LIBBASETYPEPTR, nh, 6, hub) {
+AROS_LH3(LONG, usbSetAttrsA, AROS_LHA(ULONG, type, D0), AROS_LHA(APTR, usbstruct, A0), AROS_LHA(struct TagItem *, tags, A1), LIBBASETYPEPTR, nh, 6, hubss) {
     AROS_LIBFUNC_INIT
 
+    KPRINTF(1, ("%s(%ld, 0x%p, 0x%p)\n", __func__, type, usbstruct, tags));
+
     return(0);
+
     AROS_LIBFUNC_EXIT
 }
 
 /* /// "usbDoMethodA()" */
-AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, methoddata, A1), LIBBASETYPEPTR, nh, 7, hub) {
+AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, methoddata, A1), LIBBASETYPEPTR, nh, 7, hubss) {
     AROS_LIBFUNC_INIT
 
-    struct NepClassHub *nch;
+    struct NepClassHubSS *nch;
 
-    KPRINTF(1, ("Do Method %ld\n", methodid));
+    KPRINTF(1, ("%s(%ld)\n", __func__, methodid));
+
     switch(methodid) {
         case UCM_AttemptDeviceBinding:
             return((IPTR) GM_UNIQUENAME(usbAttemptDeviceBinding)(nh, (struct PsdDevice *) methoddata[0]));
@@ -240,7 +244,7 @@ AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, met
             return((IPTR) GM_UNIQUENAME(usbForceDeviceBinding)(nh, (struct PsdDevice *) methoddata[0]));
 
         case UCM_ReleaseDeviceBinding:
-            GM_UNIQUENAME(usbReleaseDeviceBinding)(nh, (struct NepClassHub *) methoddata[0]);
+            GM_UNIQUENAME(usbReleaseDeviceBinding)(nh, (struct NepClassHubSS *) methoddata[0]);
             return(TRUE);
 
         case UCM_HubPowerCyclePort:
@@ -254,7 +258,7 @@ AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, met
             }
 
             Forbid();
-            nch = (struct NepClassHub *) nh->nh_Bindings.lh_Head;
+            nch = (struct NepClassHubSS *) nh->nh_Bindings.lh_Head;
             while(nch->nch_Node.ln_Succ) {
                 if(nch->nch_Device == pd) {
                     KPRINTF(20, ("HubPowerCycle/DisablePort Dev found (port %ld)!\n", port));
@@ -271,7 +275,7 @@ AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, met
                     }
                     break;
                 }
-                nch = (struct NepClassHub *) nch->nch_Node.ln_Succ;
+                nch = (struct NepClassHubSS *) nch->nch_Node.ln_Succ;
             }
             Permit();
 
@@ -279,7 +283,7 @@ AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, met
             } /* case UCM_HubDisablePort */
 
         case UCM_HubClassScan: {
-            nch = (struct NepClassHub *) methoddata[0];
+            nch = (struct NepClassHubSS *) methoddata[0];
 
             Forbid();
             nch->nch_ClassScan = TRUE;
@@ -298,9 +302,9 @@ AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, met
         case UCM_HubReleaseDevBinding:
         case UCM_HubSuspendDevice:
         case UCM_HubResumeDevice: {
-            struct NepHubMsg nhm;
+            struct NepHubSSMsg nhm;
             struct Library *ps;
-            nch = (struct NepClassHub *) methoddata[0];
+            nch = (struct NepClassHubSS *) methoddata[0];
             nhm.nhm_Result = (IPTR) NULL;
             nhm.nhm_MethodID = methodid;
             nhm.nhm_Params = methoddata;
@@ -311,7 +315,7 @@ AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, met
                     GM_UNIQUENAME(nHandleHubMethod)(nch, &nhm);
                 } else {
                     nhm.nhm_Msg.mn_ReplyPort = CreateMsgPort();
-                    nhm.nhm_Msg.mn_Length = sizeof(struct NepHubMsg);
+                    nhm.nhm_Msg.mn_Length = sizeof(struct NepHubSSMsg);
 
                     Forbid();
                     if(nch->nch_Task && nhm.nhm_Msg.mn_ReplyPort) {
@@ -324,7 +328,10 @@ AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, met
                     } else {
                         Permit();
                     }
-                    DeleteMsgPort(nhm.nhm_Msg.mn_ReplyPort);
+                    if(nhm.nhm_Msg.mn_ReplyPort)
+                    {
+                        DeleteMsgPort(nhm.nhm_Msg.mn_ReplyPort);
+                    }
                 }
                 CloseLibrary(ps);
             }
@@ -347,7 +354,7 @@ AROS_LH2(IPTR, usbDoMethodA, AROS_LHA(ULONG, methodid, D0), AROS_LHA(IPTR *, met
 AROS_UFH0(void, GM_UNIQUENAME(nHubssTask)) {
     AROS_USERFUNC_INIT
 
-    struct NepClassHub *nch;
+    struct NepClassHubSS *nch;
     struct PsdPipe *pp;
     ULONG sigmask;
     ULONG sigs;
@@ -358,7 +365,9 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubssTask)) {
     ULONG count;
     struct PsdDevice *pd;
     STRPTR devname;
-    struct NepHubMsg *nhm;
+    struct NepHubSSMsg *nhm;
+
+    KPRINTF(1, ("%s()\n", __func__));
 
     if((nch = GM_UNIQUENAME(nAllocHub)())) {
         Forbid();
@@ -397,7 +406,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubssTask)) {
             }
             sigs = Wait(sigmask);
 
-            while((nhm = (struct NepHubMsg *) GetMsg(nch->nch_CtrlMsgPort))) {
+            while((nhm = (struct NepHubSSMsg *) GetMsg(nch->nch_CtrlMsgPort))) {
                 GM_UNIQUENAME(nHandleHubMethod)(nch, nhm);
                 ReplyMsg((struct Message *) nhm);
             }
@@ -417,15 +426,27 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubssTask)) {
                             psdSendEvent(EHMB_REMDEVICE, pd, NULL);
                             (nch->nch_Downstream)[num-1] = NULL;
                             pd = NULL;
-                            /* disable port */
-                            psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
-                                         USR_CLEAR_FEATURE, UFS_PORT_ENABLE, (ULONG) num);
-                            ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
-                            if(ioerr) {
-                                psdAddErrorMsg(RETURN_WARN, (STRPTR) libname,
-                                               "CLEAR_PORT_ENABLE failed: %s (%ld)",
-                                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                                KPRINTF(1, ("CLEAR_PORT_ENABLE failed %ld.\n", ioerr));
+                            /*
+                             * Disable the port so a device that has gone
+                             * does not hold the bus. PORT_ENABLE is not a
+                             * feature a SuperSpeed hub accepts - it stalls
+                             * it, which halts the hub's EP0 in the middle
+                             * of this cleanup - and a SuperSpeed link needs
+                             * no such help: the port follows the link down
+                             * by itself when the device leaves.
+                             */
+                            if(!nch->nch_SSPortProto) {
+                                KPRINTF(1, ("hubss: USR_CLEAR_FEATURE:UFS_PORT_ENABLE for removed device..\n"));
+
+                                psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                                             USR_CLEAR_FEATURE, UFS_PORT_ENABLE, (ULONG) num);
+                                ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
+                                if(ioerr) {
+                                    psdAddErrorMsg(RETURN_WARN, (STRPTR) libname,
+                                                   "CLEAR_PORT_ENABLE failed: %s (%ld)",
+                                                   psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                                    KPRINTF(1, ("CLEAR_PORT_ENABLE failed %ld.\n", ioerr));
+                                }
                             }
                         }
                         if(nch->nch_PowerCycle & (1<<num)) {
@@ -589,7 +610,11 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubssTask)) {
                                                      USR_CLEAR_FEATURE, UFS_C_PORT_OVER_CURRENT, (ULONG) num);
                                         psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
                                     }
-                                    if(uhps.wPortChange & UPSF_PORT_SUSPEND)
+                                    /* A SuperSpeed hub has no suspend change
+                                       bit; bit 2 is reserved there and the
+                                       link state carries U1/U2/U3 instead. */
+                                    if(!nch->nch_SSPortProto &&
+                                       (uhps.wPortChange & UPSF_PORT_SUSPEND))
                                     {
                                         if((!(uhps.wPortStatus & UPSF_PORT_SUSPEND)) && pd)
                                         {
@@ -686,11 +711,11 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubssTask)) {
 }
 
 /* /// "nAllocHub()" */
-struct NepClassHub * GM_UNIQUENAME(nAllocHub)(void) {
+struct NepClassHubSS * GM_UNIQUENAME(nAllocHub)(void) {
     struct UsbSSHubDesc *usshd;
     //struct UsbStdBOSDesc *usbosd;
     struct Task *thistask;
-    struct NepClassHub *nch;
+    struct NepClassHubSS *nch;
     struct UsbHubStatus uhhs;
     APTR parenthub;
     LONG ioerr;
@@ -704,6 +729,8 @@ struct NepClassHub * GM_UNIQUENAME(nAllocHub)(void) {
 
     thistask = FindTask(NULL);
     nch = thistask->tc_UserData;
+
+    KPRINTF(1, ("%s()\n", __func__));
 
     do {
         if(!(nch->nch_Base = OpenLibrary("poseidon.library", 4))) {
@@ -721,6 +748,15 @@ struct NepClassHub * GM_UNIQUENAME(nAllocHub)(void) {
 
         nch->nch_IsRootHub = (parenthub ? FALSE : TRUE);
         nch->nch_IsUSB30 = issuperspeed;
+
+        /*
+         * A real SuperSpeed hub answers GET_PORT_STATUS in the USB 3 format
+         * and stalls the USB 2.0 port features. The root hub is emulated by
+         * the host controller driver, which reports the USB 2.0 layout with
+         * a synthetic superspeed flag and covers both its USB 2 and USB 3
+         * ports, so it keeps the older decoding.
+         */
+        nch->nch_SSPortProto = (issuperspeed && !nch->nch_IsRootHub);
 
         if(!nch->nch_Interface) {
             nch->nch_Interface = psdFindInterface(nch->nch_Device, NULL, IFA_Class, HUB_CLASSCODE, TAG_END);
@@ -769,8 +805,9 @@ struct NepClassHub * GM_UNIQUENAME(nAllocHub)(void) {
 
         if((nch->nch_CtrlMsgPort = CreateMsgPort())) {
             if((nch->nch_TaskMsgPort = CreateMsgPort())) {
+                KPRINTF(2, ("Allocating EP0 pipe..\n"));
                 if((nch->nch_EP0Pipe = psdAllocPipe(nch->nch_Device, nch->nch_TaskMsgPort, NULL))) {
-
+                    KPRINTF(2, ("EP0 pipe @ 0x%p\n", nch->nch_EP0Pipe));
                     psdSetAttrs(PGA_PIPE, nch->nch_EP0Pipe, PPA_NakTimeout, TRUE, PPA_NakTimeoutTime, 1000, TAG_END);
                     psdSetAltInterface(nch->nch_EP0Pipe, nch->nch_Interface);
 
@@ -819,6 +856,43 @@ struct NepClassHub * GM_UNIQUENAME(nAllocHub)(void) {
                                                     (ULONG)nch->nch_Removable));
 
                                         psdFreeVec(usshd);
+
+                                        /*
+                                         * A SuperSpeed hub needs to be told how
+                                         * far down the tree it sits before it
+                                         * can work out which nibble of a route
+                                         * string names one of its own ports.
+                                         * Depth counts the hubs between it and
+                                         * the root hub, so a hub on a root port
+                                         * is depth zero.
+                                         */
+                                        if(nch->nch_SSPortProto) {
+                                            struct PsdDevice *uphub = (struct PsdDevice *)parenthub;
+                                            ULONG hubdepth = 0;
+
+                                            while(uphub) {
+                                                IPTR next = (IPTR)NULL;
+
+                                                psdGetAttrs(PGA_DEVICE, uphub,
+                                                            DA_HubDevice, &next, TAG_END);
+                                                if(!next)
+                                                    break;
+
+                                                hubdepth++;
+                                                uphub = (struct PsdDevice *)next;
+                                            }
+
+                                            psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_DEVICE,
+                                                         USR_SET_HUB_DEPTH, hubdepth, 0);
+                                            if((ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0))) {
+                                                psdAddErrorMsg(RETURN_WARN, (STRPTR) libname,
+                                                               "SET_HUB_DEPTH(%ld) failed: %s (%ld)",
+                                                               hubdepth,
+                                                               psdNumToStr(NTS_IOERR, ioerr, "unknown"),
+                                                               ioerr);
+                                            }
+                                            KPRINTF(2, ("SET_HUB_DEPTH(%ld) -> %ld\n", hubdepth, ioerr));
+                                        }
 
                                         psdPipeSetup(nch->nch_EP0Pipe, URTF_IN|URTF_CLASS|URTF_DEVICE, USR_GET_STATUS, 0, 0);
                                         ioerr = psdDoPipe(nch->nch_EP0Pipe, &uhhs, sizeof(struct UsbHubStatus));
@@ -925,7 +999,7 @@ struct NepClassHub * GM_UNIQUENAME(nAllocHub)(void) {
 }
 
 /* /// "nFreeHub()" */
-void GM_UNIQUENAME(nFreeHub)(struct NepClassHub *nch) {
+void GM_UNIQUENAME(nFreeHub)(struct NepClassHubSS *nch) {
     UWORD num;
     LONG ioerr;
     struct PsdDevice *pd;
@@ -933,7 +1007,8 @@ void GM_UNIQUENAME(nFreeHub)(struct NepClassHub *nch) {
     IPTR isconnected;
     struct Message *msg;
 
-    KPRINTF(1, ("FreeHub\n"));
+    KPRINTF(1, ("%s(0x%p)\n", __func__, nch));
+
     psdGetAttrs(PGA_DEVICE, nch->nch_Device, DA_IsConnected, &isconnected, TAG_END);
     for(num = 1; num <= nch->nch_NumPorts; num++) {
         KPRINTF(1, ("Iterating Port %ld\n", num));
@@ -986,51 +1061,147 @@ void GM_UNIQUENAME(nFreeHub)(struct NepClassHub *nch) {
     KPRINTF(1, ("Really gone now!\n"));
 }
 
-
 /* *** HUBSS Class *** */
 
 /* /// "nClearPortStatus()" */
-LONG GM_UNIQUENAME(nClearPortStatus)(struct NepClassHub *nch, UWORD port) {
+LONG GM_UNIQUENAME(nClearPortStatus)(struct NepClassHubSS *nch, UWORD port)
+{
     LONG ioerr;
+    LONG firsterr = 0;
 
-    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_C_PORT_CONNECTION, (ULONG) port);
+    KPRINTF(1, ("%s(0x%p, %ld)\n", __func__, nch, port));
+
+    /* Best-effort: try to clear all relevant change bits. Do not abort early,
+       otherwise we may leave sticky change flags behind and re-trigger events. */
+
+    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                 USR_CLEAR_FEATURE, UFS_C_PORT_CONNECTION, (ULONG)port);
     if((ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0))) {
-        psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_FEATURE (C_PORT_CONNECTION) failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-        KPRINTF(10, ("Some error occurred clearing hub status bits!\n"));
-        return(ioerr);
+        psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                       "CLEAR_PORT_FEATURE (C_PORT_CONNECTION) failed: %s (%ld)",
+                       psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+        KPRINTF(10, ("error occurred clearing UFS_C_PORT_CONNECTION!\n"));
+        if(!firsterr) firsterr = ioerr;
     }
 
-    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_C_PORT_ENABLE, (ULONG) port);
-    if((ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0))) {
-        psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_FEATURE (C_PORT_ENABLE) failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-        KPRINTF(10, ("Some error occurred clearing hub status bits!\n"));
-        return(ioerr);
+    /*
+     * C_PORT_ENABLE and C_PORT_SUSPEND do not exist on a SuperSpeed hub and
+     * are stalled by it; the link state change bits take their place.
+     */
+    if(nch->nch_SSPortProto) {
+        static const UWORD ssfeatures[] = {
+            UFS_C_BH_PORT_RESET, UFS_C_PORT_LINK_STATE, UFS_C_PORT_CONFIG_ERROR
+        };
+        UWORD i;
+
+        for(i = 0; i < (UWORD)(sizeof(ssfeatures) / sizeof(ssfeatures[0])); i++) {
+            psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                         USR_CLEAR_FEATURE, ssfeatures[i], (ULONG)port);
+            if((ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0))) {
+                KPRINTF(10, ("error occurred clearing SS change feature %ld!\n",
+                             (ULONG)ssfeatures[i]));
+                if(!firsterr) firsterr = ioerr;
+            }
+        }
+    } else {
+        psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                     USR_CLEAR_FEATURE, UFS_C_PORT_ENABLE, (ULONG)port);
+        if((ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0))) {
+            psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                           "CLEAR_PORT_FEATURE (C_PORT_ENABLE) failed: %s (%ld)",
+                           psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+            KPRINTF(10, ("error occurred clearing UFS_C_PORT_ENABLE!\n"));
+            if(!firsterr) firsterr = ioerr;
+        }
+
+        psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                     USR_CLEAR_FEATURE, UFS_C_PORT_SUSPEND, (ULONG)port);
+        if((ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0))) {
+            psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                           "CLEAR_PORT_FEATURE (C_PORT_SUSPEND) failed: %s (%ld)",
+                           psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+            KPRINTF(10, ("error occurred clearing UFS_C_PORT_SUSPEND!\n"));
+            if(!firsterr) firsterr = ioerr;
+        }
     }
 
-    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_C_PORT_SUSPEND, (ULONG) port);
+    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                 USR_CLEAR_FEATURE, UFS_C_PORT_OVER_CURRENT, (ULONG)port);
     if((ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0))) {
-        psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_FEATURE (C_PORT_SUSPEND) failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-        KPRINTF(10, ("Some error occurred clearing hub status bits!\n"));
-        return(ioerr);
+        KPRINTF(10, ("error occurred clearing UFS_C_PORT_OVER_CURRENT!\n"));
+        if(!firsterr) firsterr = ioerr;
     }
 
-    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_C_PORT_OVER_CURRENT, (ULONG) port);
+    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                 USR_CLEAR_FEATURE, UFS_C_PORT_RESET, (ULONG)port);
     if((ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0))) {
-        //psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_FEATURE (C_OVER_CURRENT) failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-        KPRINTF(10, ("Some error occurred clearing hub status bits!\n"));
+        psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                       "CLEAR_PORT_FEATURE (C_PORT_RESET) failed: %s (%ld)",
+                       psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+        KPRINTF(10, ("error occurred clearing UFS_C_PORT_RESET!\n"));
+        if(!firsterr) firsterr = ioerr;
     }
 
-    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_C_PORT_RESET, (ULONG) port);
-    if((ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0))) {
-        psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_FEATURE (C_PORT_RESET) failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-        KPRINTF(10, ("Some error occurred clearing hub status bits!\n"));
-        return(ioerr);
-    }
-    return(0);
+    return firsterr;
 }
 
+
+/* /// "nDecodePortStatus()" */
+/*
+ * wPortStatus means different things on a USB 2.0 hub and on a SuperSpeed
+ * one - power moves from bit 8 to bit 9, the link state replaces the suspend
+ * bit and the speed becomes a field. Decode it once here so the port logic
+ * does not have to care which kind of hub answered.
+ */
+struct HubSSPortState {
+    BOOL  hps_Connected;
+    BOOL  hps_Enabled;
+    BOOL  hps_Powered;
+    BOOL  hps_InReset;
+    BOOL  hps_OverCurrent;
+    BOOL  hps_SuperSpeed;
+    BOOL  hps_HighSpeed;
+    BOOL  hps_LowSpeed;
+    UWORD hps_LinkState;
+};
+
+static void GM_UNIQUENAME(nDecodePortStatus)(struct NepClassHubSS *nch,
+                                             UWORD status,
+                                             struct HubSSPortState *hps)
+{
+    hps->hps_HighSpeed = FALSE;
+    hps->hps_LowSpeed  = FALSE;
+
+    if(nch->nch_SSPortProto) {
+        hps->hps_Connected   = (status & UPS3F_PORT_CONNECTION) ? TRUE : FALSE;
+        hps->hps_Enabled     = (status & UPS3F_PORT_ENABLE) ? TRUE : FALSE;
+        hps->hps_Powered     = (status & UPS3F_PORT_POWER) ? TRUE : FALSE;
+        hps->hps_InReset     = (status & UPS3F_PORT_RESET) ? TRUE : FALSE;
+        hps->hps_OverCurrent = (status & UPS3F_PORT_OVER_CURRENT) ? TRUE : FALSE;
+        hps->hps_LinkState   = (status & UPS3M_PORT_LINK_STATE) >> UPS3S_PORT_LINK_STATE;
+
+        /* Every downstream port of a SuperSpeed hub runs at SuperSpeed;
+           anything slower is attached to the companion USB 2.0 hub. */
+        hps->hps_SuperSpeed  = TRUE;
+    } else {
+        hps->hps_Connected   = (status & UPSF_PORT_CONNECTION) ? TRUE : FALSE;
+        hps->hps_Enabled     = (status & UPSF_PORT_ENABLE) ? TRUE : FALSE;
+        hps->hps_Powered     = (status & UPSF_PORT_POWER) ? TRUE : FALSE;
+        hps->hps_InReset     = (status & UPSF_PORT_RESET) ? TRUE : FALSE;
+        hps->hps_OverCurrent = (status & UPSF_PORT_OVER_CURRENT) ? TRUE : FALSE;
+        hps->hps_SuperSpeed  = (status & UPSF_PORT_SUPER_SPEED) ? TRUE : FALSE;
+        hps->hps_HighSpeed   = (status & UPSF_PORT_HIGH_SPEED) ? TRUE : FALSE;
+        hps->hps_LowSpeed    = (status & UPSF_PORT_LOW_SPEED) ? TRUE : FALSE;
+        hps->hps_LinkState   = (status & UPSF_PORT_SUSPEND) ? UPS3_PLS_U3 : UPS3_PLS_U0;
+    }
+}
+/* \\\ */
+
 /* /// "nConfigurePort()" */
-struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHub *nch, UWORD port) {
+struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHubSS *nch, UWORD port)
+{
+    struct HubSSPortState hps;
+
     LONG ioerr;
     LONG delayretries;
     LONG resetretries;
@@ -1041,12 +1212,14 @@ struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHub *nch, UWORD 
     BOOL washighspeed = FALSE;
     BOOL islowspeed = FALSE;
 
-    KPRINTF(2, ("\nConfiguring port %ld of hub 0x%p\n", port, nch));
+    KPRINTF(1, ("%s(0x%p, %ld)\n", __func__, nch, port));
 
     uhps.wPortStatus = 0xDEAD;
     uhps.wPortChange = 0xDA1A;
 
-    psdPipeSetup(nch->nch_EP0Pipe, URTF_IN|URTF_CLASS|URTF_OTHER, USR_GET_STATUS, UFS_PORT_CONNECTION, (ULONG) port);
+    /* HUB class GET_STATUS: wValue must be 0, wIndex is the port number. */
+    psdPipeSetup(nch->nch_EP0Pipe, URTF_IN|URTF_CLASS|URTF_OTHER,
+                 USR_GET_STATUS, 0, (ULONG)port);
     ioerr = psdDoPipe(nch->nch_EP0Pipe, &uhps, sizeof(struct UsbPortStatus));
 
     uhps.wPortStatus = AROS_WORD2LE(uhps.wPortStatus);
@@ -1055,94 +1228,169 @@ struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHub *nch, UWORD 
     if(!ioerr) {
         KPRINTF(2, ("Status 0x%04x, change 0x%04x\n", uhps.wPortStatus, uhps.wPortChange));
 
-        if(uhps.wPortStatus & UPSF_PORT_ENABLE) {
+        GM_UNIQUENAME(nDecodePortStatus)(nch, uhps.wPortStatus, &hps);
+
+        /*
+         * An enabled USB2 port is disabled first so the device is addressed
+         * from a known state. A SuperSpeed link cannot be treated that way:
+         * disabling the port puts the link into Disabled, and a port reset
+         * does not bring it back - the device stops answering entirely. A
+         * port already reporting connected and enabled at SuperSpeed has
+         * trained its own link and is ready to address as it stands, and
+         * PORT_ENABLE is not even a feature such a hub accepts.
+         */
+        if(hps.hps_Enabled && !hps.hps_SuperSpeed) {
             KPRINTF(2, ("Disabling port %u\n", port));
 
-            psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_PORT_ENABLE, (ULONG) port);
+            KPRINTF(1, ("%s: USR_CLEAR_FEATURE:UFS_PORT_ENABLE\n", __func__));
+            psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                         USR_CLEAR_FEATURE, UFS_PORT_ENABLE, (ULONG)port);
             ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
             if(ioerr) {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_ENABLE failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                               "CLEAR_PORT_ENABLE failed: %s (%ld)",
+                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
                 KPRINTF(1, ("CLEAR_PORT_ENABLE failed %ld.\n", ioerr));
             } else {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "Disabling port %ld.", port);
+                psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                               "Disabling port %ld.", port);
             }
         }
 
-        if(uhps.wPortStatus & UPSF_PORT_CONNECTION) {
+        if(hps.hps_Connected) {
             KPRINTF(2, ("There's something at port %ld!\n", port));
 
             Forbid();
             if((pd = psdAllocDevice(nch->nch_Hardware))) {
                 psdLockWriteDevice(pd);
                 Permit();
+
                 /* Hub reference */
-                psdSetAttrs(PGA_DEVICE, pd, DA_HubDevice, nch->nch_Device, DA_IsConnected, TRUE, DA_AtHubPortNumber, port, TAG_END);
-                if(uhps.wPortStatus & UPSF_PORT_LOW_SPEED) {
+                psdSetAttrs(PGA_DEVICE, pd,
+                            DA_HubDevice, nch->nch_Device,
+                            DA_IsConnected, TRUE,
+                            DA_AtHubPortNumber, port,
+                            TAG_END);
+
+                if(hps.hps_LowSpeed) {
                     psdSetAttrs(PGA_DEVICE, pd, DA_IsLowspeed, TRUE, TAG_END);
                     KPRINTF(2, ("    It's a lowspeed device!\n"));
                     islowspeed = TRUE;
                 }
+                if(hps.hps_SuperSpeed) {
+                    psdSetAttrs(PGA_DEVICE, pd, DA_IsSuperspeed, TRUE, TAG_END);
+                    KPRINTF(2, ("    It's a superspeed device!\n"));
+                }
 
                 ObtainSemaphore(&nch->nch_HubBase->nh_Adr0Sema);
 
+                /*
+                 * A SuperSpeed port that already reads connected and enabled
+                 * with its link in U0 has trained itself and left the device
+                 * ready to address. The reset below belongs to USB2
+                 * enumeration, where it is what makes a device answer at all;
+                 * asking for it here only drives the port into reset, which
+                 * it never leaves.
+                 */
+                if(hps.hps_SuperSpeed && hps.hps_Enabled &&
+                   (hps.hps_LinkState == UPS3_PLS_U0))
+                {
+                    KPRINTF(2, ("    SuperSpeed link already up, skipping reset\n"));
+
+                    GM_UNIQUENAME(nClearPortStatus)(nch, port);
+                    psdDelayMS(100);
+
+                    if((pp = psdAllocPipe(pd, nch->nch_TaskMsgPort, NULL))) {
+                        if(psdEnumerateDevice(pp)) {
+                            KPRINTF(2, ("  Device successfully added!\n"));
+                            psdFreePipe(pp);
+                            psdUnlockDevice(pd);
+                            psdSendEvent(EHMB_ADDDEVICE, pd, NULL);
+                            ReleaseSemaphore(&nch->nch_HubBase->nh_Adr0Sema);
+                            return pd;
+                        }
+                        psdFreePipe(pp);
+                    }
+                    resetretries = 3;
+                } else
                 for(resetretries = 0; resetretries < 3; resetretries++) {
-                    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_SET_FEATURE, UFS_PORT_RESET, (ULONG) port);
+                    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                                 USR_SET_FEATURE, UFS_PORT_RESET, (ULONG)port);
                     ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
 
                     if(ioerr) {
-                        psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "PORT_RESET for port %ld failed: %s (%ld)", port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                        psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                                       "PORT_RESET for port %ld failed: %s (%ld)",
+                                       port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
                         KPRINTF(1, ("PORT_RESET failed %ld.\n", ioerr));
                         break;
                     }
 
                     if(nch->nch_IsRootHub) {
-                        // Root hubs need 50ms minimum delay
+                        /* Root hubs need 50ms minimum delay */
                         psdDelayMS(50);
                     }
 
                     for(delayretries = 0; delayretries < 500; delayretries += delaytime) {
                         psdDelayMS(delaytime);
-                        psdPipeSetup(nch->nch_EP0Pipe, URTF_IN|URTF_CLASS|URTF_OTHER, USR_GET_STATUS, UFS_PORT_CONNECTION, (ULONG) port);
+
+                        /* HUB class GET_STATUS: wValue must be 0, wIndex is the port number. */
+                        psdPipeSetup(nch->nch_EP0Pipe, URTF_IN|URTF_CLASS|URTF_OTHER,
+                                     USR_GET_STATUS, 0, (ULONG)port);
                         ioerr = psdDoPipe(nch->nch_EP0Pipe, &uhps, sizeof(struct UsbPortStatus));
 
                         uhps.wPortStatus = AROS_WORD2LE(uhps.wPortStatus);
                         uhps.wPortChange = AROS_WORD2LE(uhps.wPortChange);
 
                         if(ioerr) {
-                            psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "GET_PORT_CONNECTION for port %ld failed: %s (%ld)", port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                            KPRINTF(1, ("GET_PORT_CONNECTION failed %ld.\n", ioerr));
+                            psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                                           "GET_PORT_STATUS for port %ld failed: %s (%ld)",
+                                           port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                            KPRINTF(1, ("GET_PORT_STATUS failed %ld.\n", ioerr));
                             break;
                         }
 
-                        KPRINTF(2, ("After reset: status 0x%04x, change 0x%04x\n", uhps.wPortStatus, uhps.wPortChange));
-                        if(!(uhps.wPortStatus & UPSF_PORT_CONNECTION)) {
+                        KPRINTF(2, ("After reset: status 0x%04x, change 0x%04x\n",
+                                    uhps.wPortStatus, uhps.wPortChange));
+
+                        GM_UNIQUENAME(nDecodePortStatus)(nch, uhps.wPortStatus, &hps);
+
+                        if(!hps.hps_Connected) {
                             break;
                         }
 
-                        if((uhps.wPortStatus & (UPSF_PORT_RESET|UPSF_PORT_CONNECTION|UPSF_PORT_ENABLE|UPSF_PORT_POWER|UPSF_PORT_OVER_CURRENT)) == (UPSF_PORT_CONNECTION|UPSF_PORT_ENABLE|UPSF_PORT_POWER)) {
-                            if((uhps.wPortStatus & UPSF_PORT_HIGH_SPEED) || washighspeed) {
+                        if(hps.hps_Connected && hps.hps_Enabled && hps.hps_Powered &&
+                           !hps.hps_InReset && !hps.hps_OverCurrent &&
+                           (!hps.hps_SuperSpeed || (hps.hps_LinkState == UPS3_PLS_U0)))
+                        {
+                            if(hps.hps_SuperSpeed) {
+                                psdSetAttrs(PGA_DEVICE, pd, DA_IsSuperspeed, TRUE, TAG_END);
+                                KPRINTF(2, ("    It's a superspeed device!\n"));
+                            } else if(hps.hps_HighSpeed || washighspeed) {
                                 psdSetAttrs(PGA_DEVICE, pd, DA_IsHighspeed, TRUE, TAG_END);
                                 washighspeed = TRUE;
                                 KPRINTF(2, ("    It's a highspeed device!\n"));
                             } else {
                                 IPTR needssplit = 0;
 
-                                                /* Some hubs (Apple Keyboard bultin hub) report speed correctly only after reset */
-                                if (uhps.wPortStatus & UPSF_PORT_LOW_SPEED) {
+                                /* Some hubs report speed correctly only after reset */
+                                if(hps.hps_LowSpeed) {
                                     psdSetAttrs(PGA_DEVICE, pd, DA_IsLowspeed, TRUE, TAG_END);
-                                        KPRINTF(2, ("    It's a lowspeed device!\n"));
-                                            islowspeed = TRUE;
-                                        }
+                                    KPRINTF(2, ("    It's a lowspeed device!\n"));
+                                    islowspeed = TRUE;
+                                }
 
-                                // inherit needs split from hub
-                                psdGetAttrs(PGA_DEVICE, nch->nch_Device, DA_NeedsSplitTrans, &needssplit, TAG_END);
+                                /* inherit needs split from hub */
+                                psdGetAttrs(PGA_DEVICE, nch->nch_Device,
+                                            DA_NeedsSplitTrans, &needssplit, TAG_END);
                                 KPRINTF(2, ("    Needs split transfers: %ld\n", needssplit));
 
                                 psdSetAttrs(PGA_DEVICE, pd, DA_NeedsSplitTrans, needssplit, TAG_END);
                             }
 
                             GM_UNIQUENAME(nClearPortStatus)(nch, port);
-                            psdDelayMS((ULONG) (islowspeed ? 1000 : 100));
+                            psdDelayMS((ULONG)(islowspeed ? 1000 : 100));
+
                             if((pp = psdAllocPipe(pd, nch->nch_TaskMsgPort, NULL))) {
                                 if(psdEnumerateDevice(pp)) {
                                     KPRINTF(2, ("  Device successfully added!\n"));
@@ -1150,15 +1398,18 @@ struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHub *nch, UWORD 
                                     psdUnlockDevice(pd);
                                     psdSendEvent(EHMB_ADDDEVICE, pd, NULL);
                                     ReleaseSemaphore(&nch->nch_HubBase->nh_Adr0Sema);
-                                    return(pd);
+                                    return pd;
                                 }
                                 psdFreePipe(pp);
                             }
                             break;
                         } else {
-                            if(!(uhps.wPortStatus & UPSF_PORT_RESET)) {
-                                psdAddErrorMsg(RETURN_ERROR, (STRPTR) libname, "Wrong port status %04lx for port %ld!", uhps.wPortStatus, port);
-                                KPRINTF(2, ("Wrong port status %04lx for port %ld.\n", uhps.wPortStatus, port));
+                            if(!hps.hps_InReset) {
+                                psdAddErrorMsg(RETURN_ERROR, (STRPTR)libname,
+                                               "Wrong port status %04lx for port %ld!",
+                                               uhps.wPortStatus, port);
+                                KPRINTF(2, ("Wrong port status %04lx for port %ld.\n",
+                                            uhps.wPortStatus, port));
                             }
                         }
 
@@ -1167,38 +1418,51 @@ struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHub *nch, UWORD 
                         }
                     }
 
-                    if((uhps.wPortStatus & \
-                        (UPSF_PORT_RESET|UPSF_PORT_CONNECTION|UPSF_PORT_ENABLE|UPSF_PORT_POWER|UPSF_PORT_OVER_CURRENT|UPSF_PORT_LOW_SPEED)) \
-                        == (UPSF_PORT_CONNECTION|UPSF_PORT_POWER|UPSF_PORT_LOW_SPEED)) {
+                    /* A low speed device that will not come up is worth a
+                       power cycle. The test reads USB 2.0 status bits and
+                       clears PORT_ENABLE, neither of which a SuperSpeed hub
+                       has, so it stays on the USB 2.0 path. */
+                    if(!nch->nch_SSPortProto &&
+                       (uhps.wPortStatus &
+                        (UPSF_PORT_RESET|UPSF_PORT_CONNECTION|UPSF_PORT_ENABLE|
+                         UPSF_PORT_POWER|UPSF_PORT_OVER_CURRENT|UPSF_PORT_LOW_SPEED))
+                       == (UPSF_PORT_CONNECTION|UPSF_PORT_POWER|UPSF_PORT_LOW_SPEED))
+                    {
+                        psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                                       "Strange port response, power-cycling port %ld", port);
 
-                        psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "Strange port response, power-cycling port %ld", port);
-                        psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_PORT_ENABLE, (ULONG) port);
+                        psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                                     USR_CLEAR_FEATURE, UFS_PORT_ENABLE, (ULONG)port);
                         ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
-
                         if(ioerr) {
-                            psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_ENABLE for port %ld failed: %s (%ld)", port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                            psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                                           "CLEAR_PORT_ENABLE for port %ld failed: %s (%ld)",
+                                           port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
                             KPRINTF(1, ("CLEAR_PORT_ENABLE for port %ld failed %ld!\n", port, ioerr));
                         }
                         psdDelayMS(50);
 
-                        psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_PORT_POWER, (ULONG) port);
+                        psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                                     USR_CLEAR_FEATURE, UFS_PORT_POWER, (ULONG)port);
                         ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
-
                         if(ioerr) {
-                            psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_POWER for port %ld failed: %s (%ld)", port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                            psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                                           "CLEAR_PORT_POWER for port %ld failed: %s (%ld)",
+                                           port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
                             KPRINTF(1, ("CLEAR_PORT_POWER for port %ld failed %ld!\n", port, ioerr));
                         }
                         psdDelayMS(50);
 
-                        psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_SET_FEATURE, UFS_PORT_POWER, (ULONG) port);
+                        psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                                     USR_SET_FEATURE, UFS_PORT_POWER, (ULONG)port);
                         ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
-
                         if(ioerr) {
-                            psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "SET_PORT_POWER for port %ld failed: %s (%ld)", port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                            psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                                           "SET_PORT_POWER for port %ld failed: %s (%ld)",
+                                           port, psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
                             KPRINTF(1, ("SET_PORT_POWER for port %ld failed %ld!\n", port, ioerr));
                         }
-                        psdDelayMS((ULONG) nch->nch_PwrGoodTime + 15);
-
+                        psdDelayMS((ULONG)nch->nch_PwrGoodTime + 15);
                     }
 
                     delaytime = 200;
@@ -1206,14 +1470,28 @@ struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHub *nch, UWORD 
 
                 psdUnlockDevice(pd);
                 psdFreeDevice(pd);
-                /* Disable port! It's too dangerous having a connection with crazy devices on the bus open */
-                psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_PORT_ENABLE, (ULONG) port);
-                ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
 
-                if(ioerr) {
-                    psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_ENABLE failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-                    KPRINTF(1, ("CLEAR_PORT_ENABLE failed %ld.\n", ioerr));
+                /*
+                 * Disable port: keep misbehaving devices from keeping the
+                 * bus wedged. Not on SuperSpeed - the hub stalls
+                 * PORT_ENABLE and the stall halts its EP0, so the port
+                 * status left behind by this failure never gets cleared
+                 * and the hub stops reporting the port at all.
+                 */
+                if(!nch->nch_SSPortProto) {
+                    KPRINTF(1, ("%s: USR_CLEAR_FEATURE:UFS_PORT_ENABLE for bad device\n", __func__));
+
+                    psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                                 USR_CLEAR_FEATURE, UFS_PORT_ENABLE, (ULONG)port);
+                    ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
+                    if(ioerr) {
+                        psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                                       "CLEAR_PORT_ENABLE failed: %s (%ld)",
+                                       psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                        KPRINTF(1, ("CLEAR_PORT_ENABLE failed %ld.\n", ioerr));
+                    }
                 }
+
                 ReleaseSemaphore(&nch->nch_HubBase->nh_Adr0Sema);
                 GM_UNIQUENAME(nClearPortStatus)(nch, port);
             } else {
@@ -1222,54 +1500,56 @@ struct PsdDevice * GM_UNIQUENAME(nConfigurePort)(struct NepClassHub *nch, UWORD 
             }
         }
     } else {
-        psdAddErrorMsg(RETURN_ERROR, (STRPTR) libname, "GET_PORT_CONNECTION failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
-        KPRINTF(1, ("GET_PORT_CONNECTION for port %d failed %ld.\n", port, ioerr));
+        psdAddErrorMsg(RETURN_ERROR, (STRPTR)libname,
+                       "GET_PORT_STATUS failed: %s (%ld)",
+                       psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+        KPRINTF(1, ("GET_PORT_STATUS for port %d failed %ld.\n", port, ioerr));
     }
-    return(NULL);
+
+    return NULL;
 }
 
+
 /* /// "nHandleHubMethod()" */
-void GM_UNIQUENAME(nHandleHubMethod)(struct NepClassHub *nch, struct NepHubMsg *nhm) {
+void GM_UNIQUENAME(nHandleHubMethod)(struct NepClassHubSS *nch, struct NepHubSSMsg *nhm)
+{
     ULONG num;
     struct PsdDevice *pd;
+
     nhm->nhm_Result = 0;
 
     switch(nhm->nhm_MethodID) {
         case UCM_HubClaimAppBinding:
-            nhm->nhm_Result = (IPTR) psdHubClaimAppBindingA((struct TagItem *) nhm->nhm_Params[1]);
+            nhm->nhm_Result = (IPTR)psdHubClaimAppBindingA((struct TagItem *)nhm->nhm_Params[1]);
             break;
 
-        case UCM_HubReleaseIfBinding: {
-            psdHubReleaseIfBinding((struct PsdInterface *) nhm->nhm_Params[1]);
+        case UCM_HubReleaseIfBinding:
+            psdHubReleaseIfBinding((struct PsdInterface *)nhm->nhm_Params[1]);
             break;
-            } /* case UCM_HubReleaseIfBinding */
 
         case UCM_HubReleaseDevBinding:
-            psdHubReleaseDevBinding((struct PsdDevice *) nhm->nhm_Params[1]);
+            psdHubReleaseDevBinding((struct PsdDevice *)nhm->nhm_Params[1]);
             break;
 
-        case UCM_AttemptSuspendDevice:
-            {
-                BOOL res = TRUE;
+        case UCM_AttemptSuspendDevice: {
+            BOOL res = TRUE;
 
-                for(num = 1; num <= nch->nch_NumPorts; num++) {
-                    if((pd = (nch->nch_Downstream)[num-1])) {
-                        res &= psdSuspendDevice(pd);
-                    }
+            for(num = 1; num <= nch->nch_NumPorts; num++) {
+                if((pd = (nch->nch_Downstream)[num-1])) {
+                    res &= psdSuspendDevice(pd);
                 }
+            }
 
-                if(res) {
-                    // suspending of all downstream devices successful, so stop all activity, too.
-                    psdAbortPipe(nch->nch_EP1Pipe);
-                    nch->nch_Running = FALSE;
-                    nhm->nhm_Result = TRUE;
-                }
-
-            } /* case UCM_AttemptSuspendDevice */
+            if(res) {
+                /* Suspending all downstream devices succeeded; stop hub activity too. */
+                psdAbortPipe(nch->nch_EP1Pipe);
+                nch->nch_Running = FALSE;
+                nhm->nhm_Result = TRUE;
+            }
             break;
+        }
 
         case UCM_AttemptResumeDevice:
-
             if(!nch->nch_Running) {
                 psdWaitPipe(nch->nch_EP1Pipe);
                 psdSendPipe(nch->nch_EP1Pipe, nch->nch_PortChanges, (nch->nch_NumPorts+8)>>3);
@@ -1283,62 +1563,81 @@ void GM_UNIQUENAME(nHandleHubMethod)(struct NepClassHub *nch, struct NepHubMsg *
                     psdResumeDevice(pd);
                 }
             }
-
             break;
 
         case UCM_HubSuspendDevice:
-            nhm->nhm_Result = GM_UNIQUENAME(nHubSuspendDevice)(nch, (struct PsdDevice *) nhm->nhm_Params[1]);
+            nhm->nhm_Result = GM_UNIQUENAME(nHubSuspendDevice)(nch, (struct PsdDevice *)nhm->nhm_Params[1]);
             break;
 
         case UCM_HubResumeDevice:
-            nhm->nhm_Result = GM_UNIQUENAME(nHubResumeDevice)(nch, (struct PsdDevice *) nhm->nhm_Params[1]);
+            nhm->nhm_Result = GM_UNIQUENAME(nHubResumeDevice)(nch, (struct PsdDevice *)nhm->nhm_Params[1]);
             break;
 
+        default:
+            /* Unknown/unsupported method */
+            nhm->nhm_Result = 0;
+            break;
     }
 }
 
+
 /* /// "nHubSuspendDevice()" */
-BOOL GM_UNIQUENAME(nHubSuspendDevice)(struct NepClassHub *nch, struct PsdDevice *pd) {
-    APTR binding = NULL;
-    APTR puc = NULL;
+BOOL GM_UNIQUENAME(nHubSuspendDevice)(struct NepClassHubSS *nch, struct PsdDevice *pd)
+{
     ULONG num;
     BOOL result = FALSE;
     LONG ioerr;
 
-    psdGetAttrs(PGA_DEVICE, pd, DA_Binding, &binding, DA_BindingClass, &puc, TAG_END);
+    /* Binding info is not used here; avoid unused-variable warnings. */
+    {
+        APTR binding = NULL;
+        APTR puc = NULL;
+        psdGetAttrs(PGA_DEVICE, pd, DA_Binding, &binding, DA_BindingClass, &puc, TAG_END);
+        (void)binding;
+        (void)puc;
+    }
 
     for(num = 1; num <= nch->nch_NumPorts; num++) {
         if(pd == (nch->nch_Downstream)[num-1]) {
-            psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_SET_FEATURE, UFS_PORT_SUSPEND, num);
+            psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                         USR_SET_FEATURE, UFS_PORT_SUSPEND, (ULONG)num);
             ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
 
             if(ioerr) {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "SET_PORT_SUSPEND failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                               "SET_PORT_SUSPEND failed: %s (%ld)",
+                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
                 KPRINTF(1, ("SET_PORT_SUSPEND failed %ld.\n", ioerr));
             } else {
                 result = TRUE;
                 psdSetAttrs(PGA_DEVICE, pd, DA_IsSuspended, TRUE, TAG_END);
                 psdSendEvent(EHMB_DEVSUSPENDED, pd, NULL);
             }
+            break; /* done */
         }
     }
 
     return result;
 }
 
+
 /* /// "nHubResumeDevice()" */
-BOOL GM_UNIQUENAME(nHubResumeDevice)(struct NepClassHub *nch, struct PsdDevice *pd) {
+BOOL GM_UNIQUENAME(nHubResumeDevice)(struct NepClassHubSS *nch, struct PsdDevice *pd)
+{
     ULONG num;
     BOOL result = FALSE;
     LONG ioerr;
 
     for(num = 1; num <= nch->nch_NumPorts; num++) {
         if(pd == (nch->nch_Downstream)[num-1]) {
-            psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER, USR_CLEAR_FEATURE, UFS_PORT_SUSPEND, (ULONG) num);
+            psdPipeSetup(nch->nch_EP0Pipe, URTF_CLASS|URTF_OTHER,
+                         USR_CLEAR_FEATURE, UFS_PORT_SUSPEND, (ULONG)num);
             ioerr = psdDoPipe(nch->nch_EP0Pipe, NULL, 0);
 
             if(ioerr) {
-                psdAddErrorMsg(RETURN_WARN, (STRPTR) libname, "CLEAR_PORT_SUSPEND failed: %s (%ld)", psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
+                psdAddErrorMsg(RETURN_WARN, (STRPTR)libname,
+                               "CLEAR_PORT_SUSPEND failed: %s (%ld)",
+                               psdNumToStr(NTS_IOERR, ioerr, "unknown"), ioerr);
                 KPRINTF(1, ("CLEAR_PORT_SUSPEND failed %ld.\n", ioerr));
             } else {
                 psdSetAttrs(PGA_DEVICE, pd, DA_IsSuspended, FALSE, TAG_END);
@@ -1346,13 +1645,9 @@ BOOL GM_UNIQUENAME(nHubResumeDevice)(struct NepClassHub *nch, struct PsdDevice *
                 result = TRUE;
                 psdDelayMS(30);
             }
+            break; /* done */
         }
     }
 
     return result;
 }
-
-
-
-
-

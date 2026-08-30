@@ -14,6 +14,8 @@
 #include <proto/exec.h>
 
 #define __NOLIBBASE__
+/* Use the variadic macro NewObject - the stub pulls in IntuitionBase */
+#define INTUITION_INLINE_NEWOBJECT
 #include <proto/alib.h>
 #include <proto/muimaster.h>
 #include <proto/dos.h>
@@ -1113,9 +1115,9 @@ STRPTR pBindingsString(LIBBASETYPEPTR ps, struct PsdDevice *pd)
 /* /// "pCheckConfigurable()" */
 ULONG pCheckConfigurable(LIBBASETYPEPTR ps, struct PsdDevice *pd)
 {
-    ULONG  hasclassgui;
-    ULONG  hasbindinggui;
-    ULONG  noconfig;
+    IPTR   hasclassgui;
+    IPTR   hasbindinggui;
+    IPTR   noconfig;
     struct PsdConfig *pc;
     struct PsdInterface *pif;
     struct Library *UsbClsBase;
@@ -1217,7 +1219,7 @@ void pOpenBindingsConfigGUI(LIBBASETYPEPTR ps, struct PsdDevice *pd)
     struct PsdConfig *pc;
     struct PsdInterface *pif;
     struct Library *UsbClsBase;
-    ULONG hascfggui;
+    IPTR hascfggui;
     psdLockReadPBase();
     if(!pIsDeviceStillValid(ps, pd))
     {
@@ -1276,7 +1278,7 @@ void pOpenClassesConfigGUI(LIBBASETYPEPTR ps, struct PsdDevice *pd)
     struct PsdConfig *pc;
     struct PsdInterface *pif;
     struct Library *UsbClsBase;
-    ULONG hascfggui;
+    IPTR hascfggui;
 
     psdLockReadPBase();
     if(!pIsDeviceStillValid(ps, pd))
