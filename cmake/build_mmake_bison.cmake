@@ -1,0 +1,15 @@
+foreach(_variable IN ITEMS BISON SOURCE_FILE OUTPUT_FILE BISON_DATA_DIR)
+  if(NOT DEFINED ${_variable} OR "${${_variable}}" STREQUAL "")
+    message(FATAL_ERROR "Missing ${_variable}")
+  endif()
+endforeach()
+get_filename_component(_directory "${OUTPUT_FILE}" DIRECTORY)
+file(MAKE_DIRECTORY "${_directory}")
+file(REMOVE "${OUTPUT_FILE}")
+execute_process(COMMAND "${CMAKE_COMMAND}" -E env "BISON_PKGDATADIR=${BISON_DATA_DIR}"
+  "${BISON}" -o "${OUTPUT_FILE}" "${SOURCE_FILE}"
+  RESULT_VARIABLE _result)
+if(NOT _result EQUAL 0 OR NOT EXISTS "${OUTPUT_FILE}")
+  file(REMOVE "${OUTPUT_FILE}")
+  message(FATAL_ERROR "Bison failed to generate ${OUTPUT_FILE}: ${_result}")
+endif()

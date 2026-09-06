@@ -23,6 +23,7 @@
 #include LC_LIBDEFS_FILE
 
 #include "dos_intern.h"
+#include "../dosboot/bootdebug.h"
 
 static const UBYTE version[];
 extern const char LIBEND;
@@ -309,7 +310,7 @@ static void DosExpunge(struct DosLibrary *DOSBase)
          * Someone is holding us... Perhaps some handler started subprocess
          * which didn't quit. Who knows...
          */
-        D(bug("[DosInit] Open count is %d, can't expunge\n"));
+        D(bug("[DosInit] Open count is %d, can't expunge\n", DOSBase->dl_lib.lib_OpenCnt));
         return;
     }
 

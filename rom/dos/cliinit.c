@@ -17,6 +17,7 @@
 
 #include "dos_intern.h"
 #include "../expansion/expansion_intern.h"
+#include "../dosboot/bootdebug.h"
 
 #ifdef DEBUG_DOSTYPE
 
@@ -343,7 +344,10 @@ static struct MsgPort *mountBootNode(struct DeviceNode *dn, struct FileSysResour
         D(bug("Failed\n"));
         RemDosEntry((struct DosList *)dn);
     }
-    D(else bug("Dos/CliInit: AddDosEntry() failed\n"));
+    else
+    {
+        D(bug("Dos/CliInit: AddDosEntry() failed\n"));
+    }
 
     /*
      * TODO: AddDosEntry() can fail in case of duplicate name. In this case it would be useful

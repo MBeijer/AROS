@@ -1,0 +1,207 @@
+cmake_minimum_required(VERSION 3.20)
+get_filename_component(AROS_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+if(NOT TEST_BINARY_DIR)
+  message(FATAL_ERROR "Pass -DTEST_BINARY_DIR=<scratch-directory>")
+endif()
+set(AROS_CONFIG_BUILD_DIR "${TEST_BINARY_DIR}/config-snapshot")
+set(_config_dir "${AROS_CONFIG_BUILD_DIR}/bin/linux-x86_64/gen/config")
+file(MAKE_DIRECTORY "${_config_dir}")
+file(WRITE "${_config_dir}/target.cfg"
+  "FAMILY := unix\nKERNEL_INCLUDES := -nostdinc -isystem /host/sys\n")
+
+function(collect module mmake out_prefix)
+  set(_context "${TEST_BINARY_DIR}/${mmake}-context.cmake")
+  set(_output "${TEST_BINARY_DIR}/${mmake}-target.cmake")
+  file(WRITE "${_context}" "
+set(AROS_SOURCE_DIR [==[${AROS_SOURCE_DIR}]==])
+set(AROS_CONFIG_BUILD_DIR [==[${AROS_CONFIG_BUILD_DIR}]==])
+set(AROS_TARGET linux-x86_64)
+set(MODULE_PATH ${module})
+set(MODULE_MMAKE_NAME ${mmake})
+set(_AROS_MMAKE_VAR_GENINCDIR [==[${TEST_BINARY_DIR}/include]==])
+set(_AROS_MMAKE_VAR_GENDIR [==[${TEST_BINARY_DIR}/gen]==])
+set(_AROS_MMAKE_VAR_HOST_DEBUG -g)
+set(_AROS_MMAKE_VAR_AROS_DIR_BOOTARCH boot/linux)
+set(_AROS_MMAKE_VAR_HOST_SYSCALL_CPPFLAGS -DHAVE_SYSCALL_H)
+set(_AROS_MMAKE_VAR_CFLAGS_GENERAL_REGS_ONLY -mgeneral-regs-only)
+")
+  execute_process(COMMAND "${CMAKE_COMMAND}" "-DCONTEXT_FILE=${_context}"
+    "-DOUTPUT_FILE=${_output}" -P "${AROS_SOURCE_DIR}/cmake/collect_mmake_host_target.cmake"
+    RESULT_VARIABLE _result)
+  if(NOT _result EQUAL 0)
+    message(FATAL_ERROR "Metadata collection failed for ${mmake}")
+  endif()
+  include("${_output}")
+  get_cmake_property(_vars VARIABLES)
+  foreach(_var IN LISTS _vars)
+    if(_var MATCHES "^MMAKE_")
+      set("${out_prefix}_${_var}" "${${_var}}" PARENT_SCOPE)
+    endif()
+  endforeach()
+endfunction()
+
+collect(arch/all-hosted/bootstrap kernel-bootstrap-hosted prog)
+if(NOT prog_MMAKE_KIND STREQUAL "prog" OR NOT prog_MMAKE_OUTPUT_NAME STREQUAL "AROSBootstrap"
+   OR NOT prog_MMAKE_USELIBS STREQUAL "bootstrap")
+  message(FATAL_ERROR "Program rule metadata was not preserved")
+endif()
+set(_sources ${prog_MMAKE_BASE_SOURCES})
+foreach(_group IN LISTS prog_MMAKE_GROUPS)
+  list(APPEND _sources ${prog_MMAKE_SOURCES_${_group}})
+  if(prog_MMAKE_SOURCES_${_group} MATCHES "/all-linux/bootstrap/preboot.c$")
+    set(_linux_flags "${prog_MMAKE_FLAGS_${_group}}")
+  elseif(prog_MMAKE_SOURCES_${_group} MATCHES "/all-unix/bootstrap/hostinterface.c$")
+    set(_unix_flags "${prog_MMAKE_FLAGS_${_group}}")
+  endif()
+endforeach()
+list(LENGTH _sources _count)
+if(NOT _count EQUAL 16 OR NOT _linux_flags MATCHES "HAVE_SYSCALL_H"
+   OR _linux_flags MATCHES "AROS_ARCHITECTURE")
+  message(FATAL_ERROR "Wrong source selection or leaked layer flags: ${_sources}")
+endif()
+if(NOT "-DAROS_ARCHITECTURE=\"linux-x86_64\"" IN_LIST _unix_flags
+   OR NOT "-DARCH=\"boot/linux\"" IN_LIST _unix_flags
+   OR NOT "-DARCH=\"boot/linux\"" IN_LIST prog_MMAKE_BASE_FLAGS)
+  message(FATAL_ERROR "Quoted macros were damaged: ${_unix_flags}")
+endif()
+foreach(_source IN LISTS _sources)
+  if(_source MATCHES "/all-unix/bootstrap/preboot.c$" OR _source MATCHES "/x86_64-pc/")
+    message(FATAL_ERROR "Inactive or overridden source selected: ${_source}")
+  endif()
+endforeach()
+
+collect(bootstrap linklibs-bootstrap lib)
+collect(bootstrap linklibs-bootstrap32 lib32)
+if(NOT lib_MMAKE_KIND STREQUAL "linklib" OR NOT lib_MMAKE_OUTPUT_NAME STREQUAL "bootstrap"
+   OR NOT lib_MMAKE_OUTPUT_DIR STREQUAL "${TEST_BINARY_DIR}/gen/lib"
+   OR NOT lib32_MMAKE_OUTPUT_DIR STREQUAL "${TEST_BINARY_DIR}/gen/lib32"
+   OR NOT lib_MMAKE_BASE_SOURCES STREQUAL "${AROS_SOURCE_DIR}/bootstrap/elfloader.c"
+   OR "-DELF_64BIT" IN_LIST lib_MMAKE_BASE_FLAGS
+   OR NOT "-DELF_64BIT" IN_LIST lib32_MMAKE_BASE_FLAGS
+   OR NOT "-mgeneral-regs-only" IN_LIST lib_MMAKE_BASE_FLAGS)
+  message(FATAL_ERROR "Flags leaked between matching linklib rules")
+endif()
+
+include("${AROS_SOURCE_DIR}/cmake/AROSMmakeBuild.cmake")
+set(AROS_TARGET linux-x86_64)
+function(check_module_compile_surfaces)
+  set(MODULE_PATH fixture)
+  set(MODULE_INCLUDE_DIRS /global/module)
+  set(MODULE_COMPILE_OPTIONS -iquote /global/quote)
+  set(AROS_NATIVE_INCLUDE_DIR /native/include)
+  set(_module_generated_include_root /native/include)
+  set(_module_compiler_include_dir /compiler/include)
+  set(_module_source_dir /base)
+  set(_module_config_cppflags -isystem /global/config)
+  set(_module_target_optimization_cflags -O2)
+  set(_module_mmake_user_cppflags -DBASE_ONLY)
+  set(_module_mmake_user_includes -isystem /base/include)
+  set(_module_mmake_user_cflags -O2)
+  set(_module_base_compile_options -iquote /base/quote)
+  _aros_module_compile_args(TRUE _base_args)
+  _aros_module_compile_args(FALSE _layer_args)
+  foreach(_args IN ITEMS _base_args _layer_args)
+    list(FIND ${_args} /compiler/include _builtin_index)
+    list(FIND ${_args} /native/include/aros/stdc _sdk_index)
+    if(_builtin_index LESS 0 OR _builtin_index GREATER_EQUAL _sdk_index)
+      message(FATAL_ERROR "SDK fallbacks precede compiler builtin headers: ${${_args}}")
+    endif()
+    _aros_prefer_host_headers("${${_args}}" _host_args)
+    if(NOT "/compiler/include" IN_LIST _host_args
+       OR "/native/include/aros/stdc" IN_LIST _host_args
+       OR "/native/include/aros/posixc" IN_LIST _host_args)
+      message(FATAL_ERROR "Host-header selection lost builtins or retained target libc: ${_host_args}")
+    endif()
+  endforeach()
+  if(NOT "-DBASE_ONLY" IN_LIST _base_args OR NOT "/base/include" IN_LIST _base_args
+     OR NOT "/base/quote" IN_LIST _base_args OR "-DBASE_ONLY" IN_LIST _layer_args
+     OR "/base/include" IN_LIST _layer_args OR "/base/quote" IN_LIST _layer_args
+     OR NOT "-O2" IN_LIST _layer_args)
+    message(FATAL_ERROR "Base flags leaked or removed shared layer defaults: ${_layer_args}")
+  endif()
+  foreach(_pair IN ITEMS "-isystem;/global/config" "-iquote;/global/quote"
+      "-isystem;/native/include/aros/posixc" "-isystem;/native/include/aros/stdc")
+    string(FIND ";${_layer_args};" ";${_pair};" _found)
+    if(_found EQUAL -1)
+      message(FATAL_ERROR "Layer option/operand pair was damaged: ${_pair}")
+    endif()
+  endforeach()
+endfunction()
+check_module_compile_surfaces()
+_aros_merge_source_compile_args("-O2;-I/base;-isystem;/sys"
+  "-O3;-I/layer;-isystem;/layer sys;-iquote;./quotes;-I;./split;-DLOCAL" _source_args)
+if(NOT _source_args STREQUAL "-I/layer;-isystem;/layer sys;-iquote;./quotes;-I;./split;-O2;-I/base;-isystem;/sys;-O3;-DLOCAL")
+  message(FATAL_ERROR "Source include precedence or compiler override order regressed: ${_source_args}")
+endif()
+_aros_merge_source_compile_args("-O2;-I/base" "" _source_args)
+if(NOT _source_args STREQUAL "-O2;-I/base")
+  message(FATAL_ERROR "Empty source flags changed the common arguments")
+endif()
+set(_AROS_MMAKE_VAR_WORDS "one two")
+_aros_expand_make_tokens("before $(addprefix -I,$(addsuffix /include,$(WORDS))) after" _affixed)
+if(NOT _affixed STREQUAL "before -Ione/include -Itwo/include after")
+  message(FATAL_ERROR "Nested Make word-list expansion failed: ${_affixed}")
+endif()
+_aros_expand_make_tokens("before$(addprefix -I,$(UNDEFINED_WORDS))after" _empty_affixed)
+if(NOT _empty_affixed STREQUAL "beforeafter")
+  message(FATAL_ERROR "Empty Make word-list expansion failed: ${_empty_affixed}")
+endif()
+set(MODULE_PATH rom/utility)
+set(MODULE_MMAKE_NAME kernel-utility)
+_aros_parse_mmake_module("${AROS_SOURCE_DIR}/${MODULE_PATH}/mmakefile.src")
+if(NOT MODULE_MMAKE_PARSED_KIND STREQUAL "module"
+   OR NOT "findtagitem" IN_LIST MODULE_MMAKE_PARSED_FILES)
+  message(FATAL_ERROR "Existing genmodule rule parsing regressed")
+endif()
+_aros_parse_mmake_module("${AROS_SOURCE_DIR}/arch/x86_64-all/utility/mmakefile.src")
+if(NOT "setmem" IN_LIST MODULE_MMAKE_PARSED_ARCH_FILES
+   OR NOT "${AROS_SOURCE_DIR}/arch/x86_64-all/utility/make.opts" IN_LIST MODULE_MMAKE_PARSED_INPUTS)
+  message(FATAL_ERROR "Layer options did not select the empty SSE SetMem replacement")
+endif()
+file(WRITE "${TEST_BINARY_DIR}/first.opts" "USER_CPPFLAGS := -DFROM_OPTIONS\n")
+file(WRITE "${TEST_BINARY_DIR}/second.opts" "USER_CPPFLAGS += -DSECOND_OPTIONS\n")
+file(WRITE "${TEST_BINARY_DIR}/options-mmakefile.src" [=[
+include first.opts second.opts
+-include missing.opts
+ifeq ($(findstring FROM_OPTIONS,$(USER_CPPFLAGS)),FROM_OPTIONS)
+FILES := selected
+else
+FILES := wrong
+endif
+%build_module mmake=options modname=options modtype=library files=$(FILES)
+USER_CPPFLAGS := -DLATER
+]=])
+set(MODULE_MMAKE_NAME options)
+_aros_parse_mmake_module("${TEST_BINARY_DIR}/options-mmakefile.src")
+if(NOT MODULE_MMAKE_PARSED_FILES STREQUAL "selected"
+   OR NOT MODULE_MMAKE_PARSED_USER_CPPFLAGS STREQUAL "-DFROM_OPTIONS;-DSECOND_OPTIONS")
+  message(FATAL_ERROR "Option include ordering or rule-local flag snapshot failed")
+endif()
+set(MODULE_PATH arch/all-unix/hidd/unixio)
+set(MODULE_MMAKE_NAME kernel-unixio)
+_aros_parse_mmake_module("${AROS_SOURCE_DIR}/${MODULE_PATH}/mmakefile.src")
+_aros_mmake_uses_kernel_includes("${MODULE_MMAKE_PARSED_USER_INCLUDES}" _host_headers)
+_aros_mmake_uses_kernel_includes("-I/target/include" _target_headers)
+if(NOT _host_headers OR _target_headers)
+  message(FATAL_ERROR "Module-level KERNEL_INCLUDES detection failed")
+endif()
+set(AROS_NATIVE_INCLUDE_DIR /native/include)
+_aros_prefer_host_headers("-O2;-I/native/include;-I;/native/include;-isystem;/native/include/aros/stdc;-isystem;/native/include/aros/posixc;-I/keep;-isystem;/host/sys" _host_args)
+if(NOT _host_args STREQUAL "-O2;-I/keep;-isystem;/host/sys;-idirafter;/native/include")
+  message(FATAL_ERROR "Host include precedence is incorrect: ${_host_args}")
+endif()
+include("${AROS_SOURCE_DIR}/cmake/AROSHostTargets.cmake")
+set(AROS_NATIVE_INCLUDE_DIR /native/include)
+_aros_host_compile_options("-isystem;/host/one;-isystem;/host/two;-I;/native/include;-DARCH=\"boot/linux\"" _flags)
+if(NOT "SHELL:-isystem \"/host/one\"" IN_LIST _flags
+   OR NOT "SHELL:-isystem \"/host/two\"" IN_LIST _flags
+   OR NOT "SHELL:-idirafter \"/native/include\"" IN_LIST _flags
+   OR NOT "-DARCH=\"boot/linux\"" IN_LIST _flags)
+  message(FATAL_ERROR "Host compiler options lost their argument grouping")
+endif()
+execute_process(COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${TEST_BINARY_DIR}/module-metadata"
+  -P "${AROS_SOURCE_DIR}/cmake/tests/mmake_module_metadata.cmake" RESULT_VARIABLE _result)
+if(NOT _result EQUAL 0)
+  message(FATAL_ERROR "Module output metadata check failed")
+endif()
+message(STATUS "Hosted manifest source, quoting, rule-isolation and option-grouping checks passed")

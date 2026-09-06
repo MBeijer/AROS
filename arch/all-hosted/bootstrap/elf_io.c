@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "elf_io.h"
+#include "bootstrap.h"
 #include "support.h"
 
 #include <aros/config.h>
@@ -62,6 +63,8 @@ void *open_file(struct ELFNode *n, unsigned int *err)
 {
     FILE *f;
 
+    if (VerboseBoot)
+        fprintf(stderr, "[Bootstrap] Reading module %s\n", ((struct ExtELFNode *)n)->FullName);
     f = fopen(((struct ExtELFNode *)n)->FullName, "rb");
     *err = f ? 0 : errno;
     

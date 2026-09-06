@@ -112,8 +112,8 @@ int main(int argc, char *argv[]) {
     if (list_mode || list_all) {
         /* list files */
         if (use_dircache && isDIRCACHE(vol->dosType)) {
-            BOOL true = TRUE;
-            adfChgEnvProp(PR_USEDIRC, &true);
+            BOOL use_dir_cache = TRUE;
+            adfChgEnvProp(PR_USEDIRC, &use_dir_cache);
             puts("Using dir cache blocks.");
         }
         if (list_all) {

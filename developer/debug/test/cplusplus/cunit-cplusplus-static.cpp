@@ -4,6 +4,7 @@
 */
 
 #include <stdlib.h>
+#include <cstddef>
 
 #include <CUnit/CUnitCI.h>
 

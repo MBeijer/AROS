@@ -1,0 +1,83 @@
+cmake_minimum_required(VERSION 3.20)
+if(NOT TEST_BINARY_DIR)
+  message(FATAL_ERROR "Pass an isolated TEST_BINARY_DIR")
+endif()
+get_filename_component(CMAKE_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+set(AROS_TARGET linux-x86_64)
+set(AROS_TARGET_FAMILY unix)
+set(AROS_LEGACY_BUILD_DIR "${TEST_BINARY_DIR}/config")
+include("${CMAKE_SOURCE_DIR}/cmake/AROSModule.cmake")
+include("${CMAKE_SOURCE_DIR}/cmake/AROSManifests.cmake")
+_aros_extract_mmake_include_interface_metadata(
+  "${CMAKE_SOURCE_DIR}/arch/all-hosted/hidd/x11/mmakefile.src" x11gfx _names _deps hosted-X11-x11gfx)
+if(NOT "hosted-X11-x11gfx-includes" IN_LIST _names)
+  message(FATAL_ERROR "Implicit build_module interface did not use the manifest mmake name")
+endif()
+_aros_evaluate_mmake_condition("ifneq (,$(findstring arm,$(AROS_TARGET_CPU)))" _arm)
+_aros_evaluate_mmake_condition("ifeq ($(findstring x86,$(AROS_TARGET_CPU)),x86)" _x86)
+if(_arm OR NOT _x86)
+  message(FATAL_ERROR "Nested Make-call commas or empty conditional operands were lost")
+endif()
+file(MAKE_DIRECTORY "${AROS_LEGACY_BUILD_DIR}/config")
+file(WRITE "${AROS_LEGACY_BUILD_DIR}/config/make.cfg" [=[
+AROS_DIR_BOOT := boot
+ifeq ($(AROS_TARGET_SUFFIX),)
+    AROS_DIR_ARCH := $(AROS_TARGET_ARCH)
+else
+    AROS_DIR_ARCH := $(AROS_TARGET_ARCH)$(AROS_TARGET_SUFFIX)
+endif
+AROS_DIR_BOOTARCH := $(AROS_DIR_BOOT)/$(AROS_DIR_ARCH)
+ifneq ($(LATER_VALUE),)
+    UNRELATED := unused
+endif
+LATER_VALUE := resolved
+ifeq ($(DEFAULT_VALUE),)
+    DEFAULT_VALUE := fallback
+endif
+]=])
+_aros_read_config_value(LATER_VALUE _later)
+_aros_read_config_value(DEFAULT_VALUE _default)
+if(NOT _later STREQUAL "resolved" OR NOT _default STREQUAL "fallback")
+  message(FATAL_ERROR "Config lookup evaluated unrelated/self-referencing conditions")
+endif()
+_aros_expand_make_tokens("$(AROS_DIR_BOOTARCH)/L" _boot_dir)
+if(NOT _boot_dir STREQUAL "boot/linux/L")
+  message(FATAL_ERROR "Indented conditional config assignments were lost: ${_boot_dir}")
+endif()
+set(_AROS_MMAKE_VAR_AROS_TARGET_SUFFIX -test)
+_aros_expand_make_tokens("$(AROS_DIR_BOOTARCH)/L" _boot_dir)
+if(NOT _boot_dir STREQUAL "boot/linux-test/L")
+  message(FATAL_ERROR "Config else branch was not selected: ${_boot_dir}")
+endif()
+unset(_AROS_MMAKE_VAR_AROS_TARGET_SUFFIX)
+set(_module arch/all-hosted/filesys/emul_handler)
+_aros_extract_mmake_build_module_metadata("${CMAKE_SOURCE_DIR}/${_module}/mmakefile.src" "${_module}" _emul)
+if(NOT _emul_MODULE_TYPE STREQUAL "resource" OR NOT _emul_MODULE_SUFFIX STREQUAL "handler"
+   OR NOT _emul_MODULE_RUNTIME_DIR STREQUAL "boot/linux/L")
+  message(FATAL_ERROR "Emulation handler type, suffix or output directory was lost")
+endif()
+_aros_extract_mmake_build_module_metadata("${CMAKE_SOURCE_DIR}/rom/utility/mmakefile.src" rom/utility _utility)
+if(_utility_MODULE_SUFFIX OR _utility_MODULE_RUNTIME_DIR)
+  message(FATAL_ERROR "Explicit output overrides leaked into default module metadata")
+endif()
+aros_layering_collect_resolved_module_layer_mmakefiles(emul_handler kernel-fs-emul _manifests _layers _aliases)
+if(NOT "${CMAKE_SOURCE_DIR}/arch/all-unix/filesys/emul_handler/mmakefile.src" IN_LIST _manifests)
+  message(FATAL_ERROR "Nested hosted filesystem layer was not resolved")
+endif()
+aros_layering_get_active_dir_layers(_layers)
+list(APPEND _layers all-hosted)
+set(_manifests)
+foreach(_layer IN LISTS _layers)
+  file(GLOB_RECURSE _layer_manifests "${CMAKE_SOURCE_DIR}/arch/${_layer}/mmakefile.src")
+  list(APPEND _manifests ${_layer_manifests})
+endforeach()
+aros_discover_genmodule_manifests(_modules MANIFESTS ${_manifests}
+  MODULE_NAMES hostlib unixio emul x11gfx)
+list(LENGTH _modules _count)
+if(NOT _count EQUAL 4
+   OR NOT "arch/all-unix/hidd/unixio|kernel-unixio|unixio|hidd" IN_LIST _modules
+   OR NOT "arch/all-hosted/filesys/emul_handler|kernel-fs-emul|emul|resource" IN_LIST _modules
+   OR NOT "arch/all-hosted/hidd/x11|hosted-X11-x11gfx|x11gfx|hidd" IN_LIST _modules)
+  message(FATAL_ERROR "Hosted module discovery lost manifest identities: ${_modules}")
+endif()
+message(STATUS "Module output metadata and nested layer checks passed")

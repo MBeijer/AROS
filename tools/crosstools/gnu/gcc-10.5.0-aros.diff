@@ -641,6 +641,10 @@ diff -Naur gcc-10.5.0/gcc/config/aros.h gcc-10.5.0.aros/gcc/config/aros.h
 +
 +/* The compiler is configured with ONLY the gcc/g++ standard headers.
 +   N.B-: NATIVE_SYSTEM_HEADER_DIR must come after GCC_INCLUDE_DIR with gcc6!! */
++/* Keep this entry macro-independent: cppdefault.c may undef
++   NATIVE_SYSTEM_HEADER_DIR in cross builds before INCLUDE_DEFAULTS expands. */
++#define AROS_NATIVE_SYSTEM_INCLUDE \
++    { "/include", NATIVE_SYSTEM_HEADER_COMPONENT, 0, 0, 1, 0 },
 +#undef INCLUDE_DEFAULTS
 +#define INCLUDE_DEFAULTS \
 +{ \
@@ -648,7 +652,7 @@ diff -Naur gcc-10.5.0/gcc/config/aros.h gcc-10.5.0.aros/gcc/config/aros.h
 +    { GPLUSPLUS_TOOL_INCLUDE_DIR, "G++", 1, 1, GPLUSPLUS_INCLUDE_DIR_ADD_SYSROOT, 1 }, \
 +    { GPLUSPLUS_BACKWARD_INCLUDE_DIR, "G++", 1, 1, GPLUSPLUS_INCLUDE_DIR_ADD_SYSROOT, 0 }, \
 +    { GCC_INCLUDE_DIR, "GCC", 0, 0, 0, 0 }, \
-+    { NATIVE_SYSTEM_HEADER_DIR, NATIVE_SYSTEM_HEADER_COMPONENT, 0, 0, 1, 0 }, \
++    AROS_NATIVE_SYSTEM_INCLUDE \
 +    { 0, 0, 0, 0, 0, 0 } \
 +}
 +
@@ -1154,7 +1158,7 @@ diff -Naur gcc-10.5.0/gcc/config.gcc gcc-10.5.0.aros/gcc/config.gcc
 +  aros_tm_file="aros-stdint.h"
 +  gas=yes
 +  gnu_ld=yes
-+  thread_file=posix
++  thread_file=single
 +  use_collect2=no
 +  xm_defines='STDC_HEADERS=1'
 +  extra_options="${extra_options} aros.opt"

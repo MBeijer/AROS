@@ -286,7 +286,7 @@ void append_string (String * s, const char * app)
     }
 }
 
-String * getline (FILE * fh)
+String * gm_getline (FILE * fh)
 {
     String * s = NULL;
     char line[256], * ptr;
@@ -328,7 +328,7 @@ void add_continuation(String *s, FILE *fh)
     
     while (s->value[s->len-1]=='\\')
     {
-        s2 = getline(fh);
+        s2 = gm_getline(fh);
         s->value[s->len-1]='\0';
         s->len--;
         append_string(s, s2->value);
@@ -444,7 +444,7 @@ void read_templates (const char * fn)
         cleanup (10);
     }
 
-    while ((line = getline (fh)))
+    while ((line = gm_getline (fh)))
     {
         ptr = line->value;
         while (isspace (*ptr)) ptr++;
@@ -534,7 +534,7 @@ void read_templates (const char * fn)
 
             free_string (line);
 
-            while ((line = getline (fh)))
+            while ((line = gm_getline (fh)))
             {
                 if (!strcmp (line->value, "%end"))
                     break;
@@ -767,7 +767,7 @@ void process_file(FILE * infile, FILE *outfile)
         , outfile
     );
 
-    while ((line = getline (infile)))
+    while ((line = gm_getline (infile)))
     {
         ptr = line->value;
         while (isspace (*ptr)) ptr++;
@@ -833,7 +833,7 @@ int main (int argc, char ** argv)
     }
     if (listfile)
     {
-        for (t = 0; (line = getline (listfile)); t++)
+        for (t = 0; (line = gm_getline (listfile)); t++)
         {
             infilename = strtok (line->value, " \t");
             if (!infilename)
