@@ -11,7 +11,9 @@
 
 /* /// "Lib Stuff" */
 static const STRPTR libname = MOD_NAME_STRING;
-
+static const STRPTR hubunknown = "unknown hub";
+static const STRPTR devunknown = "unknown device";
+        
 static int GM_UNIQUENAME(libInit)(LIBBASETYPEPTR nh)
 {
     KPRINTF(10, ("libInit nh: 0x%p SysBase: 0x%p\n", nh, SysBase));
@@ -99,6 +101,7 @@ struct NepClassHub * GM_UNIQUENAME(usbForceDeviceBinding)(struct NepHubBase * nh
         psdGetAttrs(PGA_DEVICE, pd,
                     DA_ProductName, &devname,
                     TAG_DONE);
+        if (!devname) devname = hubunknown;
         if((nch = psdAllocVec(sizeof(struct NepClassHub))))
         {
             nch->nch_HubBase = nh;
@@ -160,6 +163,7 @@ void GM_UNIQUENAME(usbReleaseDeviceBinding)(struct NepHubBase *nh, struct NepCla
         KPRINTF(1, ("Task gone\n"));
         //FreeSignal(nch->nch_ReadySignal);
         psdGetAttrs(PGA_DEVICE, nch->nch_Device, DA_ProductName, &devname, TAG_END);
+        if (!devname) devname = hubunknown;
         psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
                        "Time to get rid of '%s'!",
                        devname);
@@ -362,7 +366,10 @@ AROS_LH2(IPTR, usbDoMethodA,
                     } else {
                         Permit();
                     }
-                    DeleteMsgPort(nhm.nhm_Msg.mn_ReplyPort);
+                    if(nhm.nhm_Msg.mn_ReplyPort)
+                    {
+                        DeleteMsgPort(nhm.nhm_Msg.mn_ReplyPort);
+                    }
                 }
                 CloseLibrary(ps);
             }
@@ -412,6 +419,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubTask))
             if(((nch->nch_Downstream)[num-1] = pd = GM_UNIQUENAME(nConfigurePort)(nch, num)))
             {
                 psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+                if (!devname) devname = devunknown;
                 psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
                                "Detected device '%s' at port %ld. I like it.",
                                devname, num);
@@ -461,6 +469,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubTask))
                         {
                             psdSetAttrs(PGA_DEVICE, pd, DA_IsConnected, FALSE, TAG_END);
                             psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+                            if (!devname) devname = devunknown;
                             psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
                                            "Zapping device '%s' at port %ld!",
                                            devname, num);
@@ -490,6 +499,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubTask))
                             if(((nch->nch_Downstream)[num-1] = pd = GM_UNIQUENAME(nConfigurePort)(nch, num)))
                             {
                                 psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+                                if (!devname) devname = devunknown;
                                 psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
                                                "Device '%s' returned. Happy happy joy joy.",
                                                devname);
@@ -507,6 +517,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubTask))
                     if((pd = (nch->nch_Downstream)[num-1]))
                     {
                         psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+                        if (!devname) devname = devunknown;
                         psdHubClassScan(pd);
                     }
                 }
@@ -627,6 +638,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubTask))
                                         if(pd)
                                         {
                                             psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+                                            if (!devname) devname = devunknown;
                                         } else {
                                             devname = "a ghost";
                                         }
@@ -656,6 +668,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubTask))
                                             psdGetAttrs(PGA_DEVICE, pd, DA_IsSuspended, &oldsusp, TAG_END);
                                             psdSetAttrs(PGA_DEVICE, pd, DA_IsSuspended, FALSE, TAG_END);
                                             psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+                                            if (!devname) devname = devunknown;
                                             if(oldsusp)
                                             {
                                                 psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
@@ -669,6 +682,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubTask))
                                         {
                                             psdSetAttrs(PGA_DEVICE, pd, DA_IsSuspended, FALSE, TAG_END);
                                             psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+                                            if (!devname) devname = devunknown;
                                             psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
                                                            "Device '%s' at port %ld suspended!",
                                                            devname, num);
@@ -685,6 +699,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubTask))
                                         {
                                             psdSetAttrs(PGA_DEVICE, pd, DA_IsConnected, FALSE, TAG_END);
                                             psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+                                            if (!devname) devname = devunknown;
                                             psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
                                                            "Device '%s' at port %ld is gone!",
                                                            devname, num);
@@ -701,6 +716,7 @@ AROS_UFH0(void, GM_UNIQUENAME(nHubTask))
                                             if(((nch->nch_Downstream)[num-1] = pd = GM_UNIQUENAME(nConfigurePort)(nch, num)))
                                             {
                                                 psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+                                                if (!devname) devname = devunknown;
                                                 psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
                                                                "New device '%s' at port %ld. Very nice.",
                                                                devname, num);
@@ -943,7 +959,21 @@ struct NepClassHub * GM_UNIQUENAME(nAllocHub)(void)
                                                     KPRINTF(1, ("PORT_POWER for port %ld failed %ld!\n", num, ioerr));
                                                 }
                                             }
-                                            psdDelayMS((ULONG) nch->nch_PwrGoodTime + 15);
+                                            {
+                                                /* A device has 100ms to draw power and signal
+                                                   attach, and the hub debounces the connection
+                                                   for that long before reporting it. Hubs that
+                                                   claim a power-good time shorter than that -
+                                                   including the ones claiming zero - still owe
+                                                   the device those 100ms, and scanning sooner
+                                                   silently misses whatever is slowest to come
+                                                   up, usually the largest device present. */
+                                                ULONG settle = (ULONG) nch->nch_PwrGoodTime;
+
+                                                if(settle < 100)
+                                                    settle = 100;
+                                                psdDelayMS(settle + 15);
+                                            }
 
                                             psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
                                                            "Hub with %ld ports successfully configured.",
@@ -1022,6 +1052,7 @@ void GM_UNIQUENAME(nFreeHub)(struct NepClassHub *nch)
                 psdSetAttrs(PGA_DEVICE, pd, DA_IsConnected, FALSE, TAG_END);
             }
             psdGetAttrs(PGA_DEVICE, pd, DA_ProductName, &devname, TAG_END);
+            if (!devname) devname = devunknown;
             psdAddErrorMsg(RETURN_OK, (STRPTR) libname,
                            "My death killed device '%s' at port %ld!",
                            devname, num);

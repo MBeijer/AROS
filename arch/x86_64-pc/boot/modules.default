@@ -6,6 +6,7 @@
 /boot/@arch.dir@/Libs/expansion.library
 /Classes/USB/bootkeyboard.class
 /Classes/USB/bootmouse.class
+/Classes/USB/hubss.class
 /Classes/USB/hub.class
 /Classes/USB/hid.class
 /Classes/USB/massstorage.class
@@ -36,6 +37,7 @@
 /Devs/Drivers/ipmi.hidd
 /Devs/Drivers/smbios-ipmi.hidd
 /Devs/USBHardware/pciusb.device
+/Devs/USBHardware/pcixhci.device
 /Devs/usbromstartup.resource
 /Devs/bootloader.resource
 /Devs/dosboot.resource

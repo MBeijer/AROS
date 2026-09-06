@@ -187,14 +187,14 @@ struct HDAudioChip* AllocDriverData(APTR dev, struct DriverBase* AHIsubBase)
     success = ahi_pci_add_intserver(&card->interrupt, dev);
     if (success)
     {
+        card->interrupt_added = TRUE;
+
         if (card_init(card) < 0)
         {
             D(bug("[HDAudio] Unable to initialize Card subsystem.\n"));
 
             success = FALSE;
         }
-
-        card->interrupt_added = TRUE;
 
         card->card_initialized = TRUE;
         card->input          = 0;
@@ -1648,7 +1648,12 @@ static BOOL interrogate_unknown_chip(struct HDAudioChip *card)
 
         if (dac == 0)
         {
-            bug("Didn't find DAC!\n");
+            ULONG codec_vendor_device = get_parameter(0x0, VERB_GET_PARMS_VENDOR_DEVICE, card);
+            UWORD pci_vendor = inw_config(0, card->pci_dev);
+            UWORD pci_device = inw_config(PCI_DEVICE_ID, card->pci_dev);
+            bug("[HDAudio] Didn't find DAC! PCI device %04x:%04x, HDAudio codec %04x:%04x, codec nr = %d, function group = %xh\n",
+                pci_vendor, pci_device, (UWORD)(codec_vendor_device >> 16), (UWORD)(codec_vendor_device & 0xFFFF),
+                card->codecnr, card->function_group);
             return FALSE;
         }
 

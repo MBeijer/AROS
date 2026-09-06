@@ -14,33 +14,53 @@
 
 /*
  * Process some AROS-specific arguments.
- * 'usbpoweron' helps to bring up USB ports on IntelMac,
+ * 'USB=forcepower' helps to bring up USB ports on IntelMac,
  * whose firmware sets them up incorrectly.
  */
 static int getArguments(struct PCIDevice *base)
 {
     APTR BootLoaderBase;
 
+#if defined(AROS_USE_LOGRES)
+#ifdef LogResBase
+#undef LogResBase
+#endif
+#ifdef LogResHandle
+#undef LogResHandle
+#endif
+    APTR LogResBase;
+#define LogHandle (base->hd_LogRHandle)
+    base->hd_LogResBase = OpenResource("log.resource");
+    if (base->hd_LogResBase) {
+        LogResBase = base->hd_LogResBase;
+        base->hd_LogRHandle = logInitialise(&base->hd_Device.dd_Library.lib_Node);
+    }
+#endif
     BootLoaderBase = OpenResource("bootloader.resource");
-    if (BootLoaderBase)
-    {
+
+    pciusbDebug("", "bootloader @ 0x%p\n", BootLoaderBase);
+
+    if (BootLoaderBase) {
         struct List *args = GetBootInfo(BL_Args);
 
-        if (args)
-        {
+        if (args) {
             struct Node *node;
 
-            for (node = args->lh_Head; node->ln_Succ; node = node->ln_Succ)
-            {
-                if (stricmp(node->ln_Name, "forceusbpower") == 0)
-                {
-                    base->hd_Flags = HDF_FORCEPOWER;
-                    break;
+            ForeachNode(args, node) {
+                if (strncmp(node->ln_Name, "USB=", 4) == 0) {
+                    const char *CmdLine = &node->ln_Name[3];
+
+                    if (strstr(CmdLine, "forcepower")) {
+                        base->hd_Flags |= HDF_FORCEPOWER;
+                        continue;
+                    }
                 }
             }
         }
     }
-
+    if (base->hd_Flags & HDF_FORCEPOWER) {
+        pciusbInfo("", "Forcing USB Power\n");
+    }
     return TRUE;
 }
 

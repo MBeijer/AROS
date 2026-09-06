@@ -30,6 +30,9 @@ static LONG _rand(struct NepHidBase *nh)
 /* /// "Lib Stuff" */
 const STRPTR GM_UNIQUENAME(libname) = MOD_NAME_STRING;
 
+/* One shutdown requester at a time, however many keyboards are attached */
+BOOL GM_UNIQUENAME(powerkeybusy) = FALSE;
+
 //#define LowLevelBase nh->nh_LowLevelBase
 
 static int GM_UNIQUENAME(libInit)(LIBBASETYPEPTR nh)
@@ -240,6 +243,11 @@ struct NepClassHid * GM_UNIQUENAME(usbForceInterfaceBinding)(struct NepHidBase *
                     return(nch);
                 }
             }
+            psdAddErrorMsg(RETURN_ERROR, (STRPTR) GM_UNIQUENAME(libname),
+                           "binding FAILED '%s' if=%s: %s",
+                           devname, ifidstr,
+                           tmptask ? (STRPTR) "task died during init"
+                                   : (STRPTR) "psdSpawnSubTask failed");
             nch->nch_ReadySigTask = NULL;
             //FreeSignal(nch->nch_ReadySignal);
             psdFreeVec(nch->nch_CDC);
@@ -902,7 +910,11 @@ AROS_UFH0(void, GM_UNIQUENAME(nHidTask))
                             {
                                 wacomgood = nParseWacom(nch, buf, buflen);
                             }
-                            if(!wacomgood)
+                            /*
+                             * A zero-length reply (USB ZLP / buflen=0)
+                             * means "device has nothing to report".
+                             */
+                            if(!wacomgood && buflen > 0)
                             {
                                 // if the parser failed, use standard methods
                                 if(nch->nch_UsesReportID)
@@ -2918,11 +2930,16 @@ BOOL nParseReport(struct NepClassHid *nch, struct NepHidReport *nhr)
                                                 nhi->nhi_LogicalMin = nch->nch_HidGlobal.nhg_LogicalMin;
                                                 nhi->nhi_LogicalMax = nch->nch_HidGlobal.nhg_LogicalMax;
 
+                                                if((nhi->nhi_LogicalMin > nhi->nhi_LogicalMax) || ((nhi->nhi_LogicalMax - nhi->nhi_LogicalMin) > 65535))
+                                                {
+                                                    KPRINTF(10, ("Invalid HID logical range %ld..%ld, capping\n", nhi->nhi_LogicalMin, nhi->nhi_LogicalMax));
+                                                    nhi->nhi_LogicalMax = nhi->nhi_LogicalMin;
+                                                }
                                                 nhi->nhi_MapSize = (nhi->nhi_LogicalMax - nhi->nhi_LogicalMin)+1;
                                                 nhi->nhi_UsageMap = psdAllocVec(sizeof(ULONG) * nhi->nhi_MapSize);
                                                 nhi->nhi_ActionMap = psdAllocVec(sizeof(struct List) * nhi->nhi_MapSize);
+                                                if(nhi->nhi_Count > 65535) nhi->nhi_Count = 1;
                                                 nhi->nhi_Buffer = psdAllocVec(2 * sizeof(LONG) * nhi->nhi_Count);
-                                                nhi->nhi_OldBuffer = &nhi->nhi_Buffer[nhi->nhi_Count];
                                                 nhi->nhi_PhysicalMin = nch->nch_HidGlobal.nhg_PhysicalMin;
                                                 nhi->nhi_PhysicalMax = nch->nch_HidGlobal.nhg_PhysicalMax;
                                                 nhi->nhi_UnitExp = nch->nch_HidGlobal.nhg_UnitExp;
@@ -2941,6 +2958,7 @@ BOOL nParseReport(struct NepClassHid *nch, struct NepHidReport *nhr)
                                                     break;
                                                 }
 
+                                                nhi->nhi_OldBuffer = &nhi->nhi_Buffer[nhi->nhi_Count];
                                                 nhi->nhi_Usage = nhi->nhi_DesignIndex = nhi->nhi_StringIndex = HID_PARAM_UNDEF;
                                                 NewList(&nhi->nhi_ActionList);
 
@@ -6295,6 +6313,20 @@ BOOL nDoAction(struct NepClassHid *nch, struct NepHidAction *nha, struct NepHidI
         }
 
         case HUA_EXTRAWKEY:
+            /*
+             * The power key, whichever page it came in on - the map sends
+             * System Power Down, Keyboard Power and Consumer Power all to
+             * 0x5e.
+             */
+            if((nha->nha_RawKey == 0x5e) && !GM_UNIQUENAME(powerkeybusy))
+            {
+                GM_UNIQUENAME(powerkeybusy) = TRUE;
+                if(!psdSpawnSubTask(MOD_NAME_STRING " Power Key",
+                                    GM_UNIQUENAME(nPowerKeyTask), NULL))
+                {
+                    GM_UNIQUENAME(powerkeybusy) = FALSE;
+                }
+            }
 #if 0 // FIXME looks like AROS does not support this (yet?)
             nch->nch_FakeEvent.ie_Class = IECLASS_EXTRAWKEY;
             nch->nch_FakeEvent.ie_SubClass = 0;
@@ -7453,3 +7485,37 @@ LONG nEasyRequestA(struct NepHidBase *nh, STRPTR body, STRPTR gadgets, RAWARG pa
 }
 /* \\\ */
 
+/* /// "nPowerKeyTask()" */
+#undef IntuitionBase
+#define IntuitionBase pwrIntBase
+
+AROS_UFH0(void, GM_UNIQUENAME(nPowerKeyTask))
+{
+    AROS_USERFUNC_INIT
+
+    struct Library *pwrIntBase;
+    struct EasyStruct es;
+    LONG res = 0;
+
+    if((pwrIntBase = OpenLibrary("intuition.library", 39)))
+    {
+        es.es_StructSize = sizeof(struct EasyStruct);
+        es.es_Flags = 0;
+        es.es_Title = GM_UNIQUENAME(libname);
+        es.es_TextFormat = "Shut down the system?";
+        es.es_GadgetFormat = "Shut Down|Cancel";
+
+        res = EasyRequestArgs(NULL, &es, NULL, NULL);
+        CloseLibrary(pwrIntBase);
+    }
+
+    GM_UNIQUENAME(powerkeybusy) = FALSE;
+
+    if(res)
+        ShutdownA(SD_ACTION_POWEROFF);
+
+    AROS_USERFUNC_EXIT
+}
+
+#undef IntuitionBase
+/* \\\ */

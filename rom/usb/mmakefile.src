@@ -6,16 +6,17 @@ include $(SRCDIR)/config/aros.cfg
 # Build a complete disk-based Poseidon
 #MM- kernel-usb : \
 #MM      kernel-usb-poseidon \
-#MM      kernel-usb-shelltools \
+#MM      poseidon-usb-shellcommands \
 #MM      kernel-usb-classes \
 #MM      kernel-usb-shellapps \
 #MM      kernel-usb-trident \
 #MM      kernel-usb-pciusb \
+#MM      kernel-usb-pcixhci \
 #MM      kernel-usb-usbromstartup
 
 #MM- kernel-usb-nopci : \
 #MM      kernel-usb-poseidon \
-#MM      kernel-usb-shelltools \
+#MM      poseidon-usb-shellcommands \
 #MM      kernel-usb-classes \
 #MM      kernel-usb-shellapps \
 #MM      kernel-usb-trident
@@ -27,17 +28,18 @@ include $(SRCDIR)/config/aros.cfg
 # Clean up
 #MM- kernel-usb-clean : \
 #MM      kernel-usb-poseidon-clean \
-#MM      kernel-usb-shelltools-clean \
+#MM      poseidon-usb-shellcommands-clean \
 #MM      kernel-usb-classes-clean \
 #MM      kernel-usb-shellapps-clean \
 #MM      kernel-usb-trident-clean \
 #MM      kernel-usb-pciusb-clean \
+#MM      kernel-usb-pcixhci-clean \
 #MM      kernel-usb-usbclass-clean \
 #MM      kernel-usb-usbromstartup-clean 
 
 #MM- kernel-usb-nopci-clean : \
 #MM      kernel-usb-poseidon-clean \
-#MM      kernel-usb-shelltools-clean \
+#MM      poseidon-usb-shellcommands-clean \
 #MM      kernel-usb-classes-clean \
 #MM      kernel-usb-shellapps-clean \
 #MM      kernel-usb-trident-clean
@@ -51,9 +53,14 @@ include $(SRCDIR)/config/aros.cfg
 #MM- kernel-usb-sam440-ppc : \
 #MM         kernel-usb
 
+#MM- kernel-usb-opensbi-riscv64 : \
+#MM         kernel-usb-trident \
+#MM         kernel-usb-classes-common \
+#MM         poseidon-usb-shellcommands
+
 # This is kickstart package contents
-USB_CLASSES := USB/bootkeyboard USB/bootmouse USB/hub USB/hid USB/massstorage
-USB_DEVS    := USBHardware/pciusb
+USB_CLASSES := USB/bootkeyboard USB/bootmouse USB/hubss USB/hub USB/hid USB/massstorage
+USB_DEVS    := USBHardware/pciusb USBHardware/pcixhci
 USB_LIBS    := poseidon
 USB_RES     := usbromstartup
 

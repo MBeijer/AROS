@@ -2,6 +2,7 @@
 include $(SRCDIR)/config/aros.cfg
 
 USER_LDFLAGS := -noclibs
+#USER_CPPFLAGS := -DDEBUG=1
 
 FILES :=    hubss_class
 
@@ -10,6 +11,6 @@ FILES :=    hubss_class
 %build_module_library mmake=kernel-usb-classes-hubss \
     modname=hubss modtype=usbclass modsuffix="class" \
     files="$(FILES)" \
-    uselibs="arossupport"
+    uselibs="arossupport stdc.static"
 
 %common

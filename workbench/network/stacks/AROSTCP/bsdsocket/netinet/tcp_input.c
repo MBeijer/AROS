@@ -2,6 +2,7 @@
  * Copyright (c) 1982, 1986, 1988, 1990, 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
  * Copyright (c) 2006 Pavel Fedin
+ * Copyright (C) 2005-2026 The AROS Dev Team
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -2058,13 +2059,23 @@ tcp_mss(tp, offer)
 		bufsize = roundup(bufsize, mss);
 		if (bufsize > sb_max)
 			bufsize = sb_max;
+		/*
+		 * If window scaling won't be active on this connection,
+		 * cap the receive buffer to TCP_MAXWIN. Otherwise the
+		 * advertised window overflows the 16-bit TCP header field.
+		 */
+		if ((tp->t_flags & (TF_REQ_SCALE|TF_RCVD_SCALE)) !=
+			(TF_REQ_SCALE|TF_RCVD_SCALE) && bufsize > TCP_MAXWIN)
+			bufsize = TCP_MAXWIN;
 		(void)sbreserve(&so->so_rcv, bufsize);
 	}
 	/*
-	 * Don't force slow-start on local network.
+	 * Set initial congestion window.  Use RFC 6928 IW10
+	 * (10 segments) for non-local destinations instead of
+	 * the original 1-segment slow start.
 	 */
 	if (!in_localaddr(inp->inp_faddr))
-		tp->snd_cwnd = mss;
+		tp->snd_cwnd = MIN(10 * mss, MAX(2 * mss, 14600));
 
 #ifdef RTV_SSTHRESH
 	if (rt->rt_rmx.rmx_ssthresh) {

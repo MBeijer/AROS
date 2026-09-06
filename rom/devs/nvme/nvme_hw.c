@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2020-2025, The AROS Development Team. All rights reserved.
+    Copyright (C) 2020-2026, The AROS Development Team. All rights reserved.
 */
 
 #include <proto/exec.h>
@@ -131,23 +131,34 @@ void nvme_complete_event(struct nvme_queue *nvmeq, struct nvme_completion *cqe)
     }
 }
 
-void nvme_process_cq(struct nvme_queue *nvmeq)
+int nvme_process_cq(struct nvme_queue *nvmeq)
 {
     UWORD head, phase;
+    int processed = 0;
 
     D(bug ("[NVME:HW] %s(0x%p)\n", __func__, nvmeq);)
 
-    head = nvmeq->cq_head;
-    phase = nvmeq->cq_phase;
-
-    D(bug ("[NVME:HW] %s: head=%u, phase=%u\n", __func__, head, phase);)
-
+    /*
+     * The queue is drained both by the interrupt and by the tasks that
+     * poll while they wait, so the walk has to be atomic against them
+     * - the same protection the submission side already takes. Losing
+     * it lets two walkers consume the same entry and leaves our idea
+     * of the head disagreeing with the controller's, which on a shared
+     * pin means it keeps the line asserted for a completion nobody
+     * will ever collect.
+     */
+    Disable();
 #if defined(__AROSEXEC_SMP__)
     {
         struct NVMEBase *NVMEBase = nvmeq->dev->dev_NVMEBase;
         (void)NVMEBase;
         KrnSpinLock(&nvmeq->q_lock, NULL, SPINLOCK_MODE_WRITE);
 #endif
+
+    head = nvmeq->cq_head;
+    phase = nvmeq->cq_phase;
+
+    D(bug ("[NVME:HW] %s: head=%u, phase=%u\n", __func__, head, phase);)
     for (;;) {
         struct nvme_completion *cqe = (struct nvme_completion *)&nvmeq->cqba[head];
 
@@ -160,9 +171,18 @@ void nvme_process_cq(struct nvme_queue *nvmeq)
             phase = !phase;
         }
         nvme_complete_event(nvmeq, cqe);
+        processed++;
     }
 
-    if ((head != nvmeq->cq_head) || (phase == nvmeq->cq_phase)) {
+    /*
+     * Only ring the doorbell when we actually consumed something. Telling
+     * the controller a head it already has is not just wasted MMIO: it makes
+     * a controller that tracks outstanding completions decide the interrupt
+     * is still owed, re-assert its (level) INTx, and so drive an interrupt
+     * storm that starves the machine - this is what QEMU's controller does,
+     * and it wedges the boot as soon as the first admin command completes.
+     */
+    if ((head != nvmeq->cq_head) || (phase != nvmeq->cq_phase)) {
         D(bug ("[NVME:HW] %s: updating head=%u, phase=%u\n", __func__, head, phase);)
         nvmeq->q_db[1 << nvmeq->dev->db_stride] = head;
         nvmeq->cq_head = head;
@@ -172,5 +192,9 @@ void nvme_process_cq(struct nvme_queue *nvmeq)
         KrnSpinUnLock(&nvmeq->q_lock);
     }
 #endif
+    Enable();
+
     D(bug ("[NVME:HW] %s: finished\n", __func__);)
+
+    return processed;
 }

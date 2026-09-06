@@ -25,6 +25,22 @@ struct Library *ACPICABase = NULL;
 static int getArguments(struct PCIDevice *base)
 {
     APTR BootLoaderBase;
+#if defined(AROS_USE_LOGRES)
+#ifdef LogResBase
+#undef LogResBase
+#endif
+#ifdef LogResHandle
+#undef LogResHandle
+#endif
+    APTR LogResBase;
+#define LogHandle base->hd_LogRHandle
+    base->hd_LogResBase = OpenResource("log.resource");
+    if (base->hd_LogResBase)
+    {
+        LogResBase = base->hd_LogResBase;
+        base->hd_LogRHandle = logInitialise(&base->hd_Device.dd_Library.lib_Node);
+    }
+#endif
     if ((ACPICABase = OpenLibrary("acpica.library", 0))) {
         /*
          * Use ACPI IDs to identify known machines which need HDF_FORCEPOWER to work.
@@ -38,7 +54,7 @@ static int getArguments(struct PCIDevice *base)
             /* Yes, the last byte in ID is zero */
             if (strcmp(dsdt->OemTableId, "Macmini") == 0)
             {
-                base->hd_Flags = HDF_FORCEPOWER;
+                base->hd_Flags |= HDF_FORCEPOWER;
             }
         }
         CloseLibrary(ACPICABase);
@@ -54,17 +70,25 @@ static int getArguments(struct PCIDevice *base)
         {
             struct Node *node;
 
-            for (node = args->lh_Head; node->ln_Succ; node = node->ln_Succ)
+            ForeachNode(args, node)
             {
-                if (stricmp(node->ln_Name, "forceusbpower") == 0)
+                if (strncmp(node->ln_Name, "USB=", 4) == 0)
                 {
-                    base->hd_Flags = HDF_FORCEPOWER;
-                    break;
+                    const char *CmdLine = &node->ln_Name[3];
+
+                    if (strstr(CmdLine, "forcepower"))
+                    {
+                        base->hd_Flags |= HDF_FORCEPOWER;
+                        continue;
+                    }
                 }
             }
         }
     }
-
+    if (base->hd_Flags & HDF_FORCEPOWER)
+    {
+        pciusbInfo("", "Forcing USB Power\n");
+    }
     return TRUE;
 }
 

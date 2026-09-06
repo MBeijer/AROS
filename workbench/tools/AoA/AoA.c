@@ -8,7 +8,6 @@
 #include <proto/timer.h>
 #include <exec/rawfmt.h>
 #include <proto/dos.h>
-#include <proto/input.h>
 #include <string.h>
 
 #include "abiv0/include/exec/functions.h"
@@ -18,15 +17,16 @@
 #include "abiv0/include/aros/call32.h"
 #include "abiv0/include/input/structures.h"
 
-#include "abiv0/exec/exec_libraries.h"
+#include "abiv0/libs/exec/exec_libraries.h"
+#include "abiv0/libs/layers/layers_init.h"
+#include "abiv0/libs/cybergraphics/cybergraphics_init.h"
+#include "abiv0/devs/timer/timer_init.h"
+#include "abiv0/devs/input/input_init.h"
+#include "abiv0/devs/console/console_init.h"
 
 #include "abiv0/support.h"
 
-const TEXT version_string[] = "$VER: EmuV0 1.0 (21.01.2026)";
-
-struct DeviceProxy *abiv0TimerBase;
-struct DeviceProxy *abiv0InputBase;
-struct DeviceProxy *abiv0ConsoleBase;
+const TEXT version_string[] = "$VER: EmuV0 1.13 (25.08.2026)";
 
 struct LibraryV0 *shallow_InitResident32(struct ResidentV0 *resident, BPTR segList, struct ExecBaseV0 *SysBaseV0)
 {
@@ -65,363 +65,6 @@ unhandledCodePath(__func__, "!RTF_AUTOINIT", 0, 0);
 
     return library;
 } /* shallow_InitResident32 */
-
-#include <proto/layers.h>
-#include <graphics/regions.h>
-
-#include "abiv0/include/graphics/structures.h"
-#include "abiv0/include/graphics/proxy_structures.h"
-#include "abiv0/graphics/graphics_regions.h"
-
-struct ExecBaseV0 *Layers_SysBaseV0;
-
-struct LibraryV0 *abiv0_Layers_OpenLib(ULONG version, struct LibraryV0 *LayersBaseV0)
-{
-    LayersBaseV0->lib_OpenCnt++;
-    return LayersBaseV0;
-}
-MAKE_PROXY_ARG_2(Layers_OpenLib)
-
-BPTR abiv0_Layers_CloseLib(struct LibraryV0 *LayersBaseV0)
-{
-    LayersBaseV0->lib_OpenCnt--;
-    return BNULL;
-}
-MAKE_PROXY_ARG_1(Layers_CloseLib)
-
-BPTR abiv0_Layers_ExpungeLib(struct LibraryV0 *extralhV0, struct LibraryV0 *LayersBaseV0)
-{
-    CALL32_ARG_2_NR(__AROS_GETVECADDRV0(Layers_SysBaseV0, 42), LayersBaseV0, (APTR32)(IPTR)Layers_SysBaseV0);
-    return BNULL;
-}
-MAKE_PROXY_ARG_2(Layers_ExpungeLib)
-
-struct RegionV0 *abiv0_InstallClipRegion(struct LayerV0  *l, struct RegionV0 *region, struct LibraryV0 *LayersBaseV0)
-{
-    struct LayerProxy *lproxy = (struct LayerProxy *)l;
-    struct RegionProxy *regionproxy = (struct RegionProxy *)region;
-    if (regionproxy)
-        InstallClipRegion(lproxy->native, regionproxy->native);
-    else
-        InstallClipRegion(lproxy->native, NULL);
-
-    return NULL; /* FIXME */
-}
-MAKE_PROXY_ARG_3(InstallClipRegion)
-
-void abiv0_LockLayerInfo(struct Layer_InfoV0 *li, struct LibraryV0 *LayersBaseV0)
-{
-    struct Layer_Info *linative = (struct Layer_Info *)*(IPTR *)(&li->PrivateReserve1);
-    LockLayerInfo(linative);
-}
-MAKE_PROXY_ARG_2(LockLayerInfo)
-
-void abiv0_UnlockLayerInfo(struct Layer_InfoV0 *li, struct LibraryV0 *LayersBaseV0)
-{
-    struct Layer_Info *linative = (struct Layer_Info *)*(IPTR *)(&li->PrivateReserve1);
-    UnlockLayerInfo(linative);
-}
-MAKE_PROXY_ARG_2(UnlockLayerInfo)
-
-struct LayerV0 *abiv0_WhichLayer(struct Layer_InfoV0 *li, LONG x, LONG y, struct LibraryV0 *LayersBaseV0)
-{
-bug("abiv0_WhichLayer: STUB\n");
-    return NULL;
-}
-MAKE_PROXY_ARG_4(WhichLayer)
-
-struct Layer_InfoV0 *abiv0_NewLayerInfo(struct LibraryV0 *LayersBaseV0)
-{
-bug("abiv0_NewLayerInfo: STUB\n");
-    return NULL; /* Workaround for TextEditor.mcc 15.56*/
-}
-MAKE_PROXY_ARG_1(NewLayerInfo)
-
-void abiv0_LockLayer(LONG dummy, struct LayerV0 *layer, struct LibraryV0 *LayersBaseV0)
-{
-    struct LayerProxy *proxy = (struct LayerProxy *)layer;
-    LockLayer(dummy, proxy->native);
-
-    if (proxy->native->DamageList)
-    {
-        struct RegionProxy *rproxy = abiv0_AllocMem(sizeof(struct RegionProxy), MEMF_CLEAR, Layers_SysBaseV0);
-        rproxy->native  = proxy->native->DamageList;
-
-        syncRegionV0(rproxy);
-
-        proxy->base.DamageList  = (APTR32)(IPTR)rproxy;
-    }
-    else
-    {
-        if (proxy->base.DamageList) bug("abiv0_LockLayer: MEMORY LEAK\n");
-        proxy->base.DamageList = (APTR32)(IPTR)NULL;
-    }
-}
-MAKE_PROXY_ARG_3(LockLayer)
-
-void abiv0_UnlockLayer(struct LayerV0 *layer, struct LibraryV0 *LayersBaseV0)
-{
-    struct LayerProxy *proxy = (struct LayerProxy *)layer;
-    UnlockLayer(proxy->native);
-}
-MAKE_PROXY_ARG_2(UnlockLayer)
-
-void abiv0_EndUpdate(struct LayerV0 *l, UWORD flag, struct LibraryV0 *LayersBaseV0)
-{
-    struct LayerProxy *proxy = (struct LayerProxy *)l;
-    EndUpdate(proxy->native, flag);
-}
-MAKE_PROXY_ARG_3(EndUpdate)
-
-LONG abiv0_BeginUpdate(struct LayerV0 *l, struct LibraryV0 *LayersBaseV0)
-{
-    struct LayerProxy *proxy = (struct LayerProxy *)l;
-    BeginUpdate(proxy->native);
-}
-MAKE_PROXY_ARG_3(BeginUpdate)
-
-void abiv0_DoHookClipRects(struct Hook *hook, struct RastPortV0 * rport, struct Rectangle *rect, struct LibraryV0 *LayersBaseV0)
-{
-bug("abiv0_DoHookClipRects: STUB\n");
-    return;
-}
-MAKE_PROXY_ARG_4(DoHookClipRects)
-
-void abiv0_GetSysTime(struct timeval *dest, struct LibraryV0 *TimerBaseV0)
-{
-    GetSysTime(dest);
-}
-MAKE_PROXY_ARG_2(GetSysTime)
-
-void abiv0_SubTime(struct timeval *dest, struct timeval *src, struct LibraryV0 *TimerBaseV0)
-{
-    SubTime(dest, src);
-}
-MAKE_PROXY_ARG_3(SubTime)
-
-void abiv0_AddTime(struct timeval *dest, struct timeval *src, struct LibraryV0 *TimerBaseV0)
-{
-    AddTime(dest, src);
-}
-MAKE_PROXY_ARG_3(AddTime)
-
-LONG abiv0_CmpTime(struct timeval *dest, struct timeval *src, struct LibraryV0 *TimerBaseV0)
-{
-    return CmpTime(dest, src);
-}
-MAKE_PROXY_ARG_3(CmpTime)
-
-UWORD abiv0_PeekQualifier(struct LibraryV0 *InputBaseV0)
-{
-    struct Library *InputBase = &(((struct DeviceProxy *)InputBaseV0)->native->dd_Library);
-    return PeekQualifier();
-}
-MAKE_PROXY_ARG_1(PeekQualifier)
-
-#include <proto/console.h>
-
-LONG abiv0_RawKeyConvert(struct InputEventV0 *events, STRPTR buffer, LONG length, struct KeyMap * keyMap, struct LibraryV0 *ConsoleBaseV0)
-{
-    /* Support SDL->CGX_TranslateKey case */
-    if (length != 5 || keyMap != NULL)
-    {
-unhandledCodePath(__func__, "length or keymap", length, (ULONG)(IPTR)keyMap);
-        return 0;
-    }
-    if ((APTR)(IPTR)events->ie_position.ie_addr != NULL)
-    {
-bug("abiv0_RawKeyConvert: STUB\n");
-        return 0;
-    }
-
-    struct Library *ConsoleDevice = &(((struct DeviceProxy *)ConsoleBaseV0)->native->dd_Library);
-    struct InputEvent eventnative;
-    eventnative.ie_Qualifier    = events->ie_Qualifier;
-    eventnative.ie_Class        = events->ie_Class;
-    eventnative.ie_SubClass     = events->ie_SubClass;
-    eventnative.ie_Code         = events->ie_Code;
-    eventnative.ie_position.ie_addr = NULL;
-    eventnative.ie_NextEvent = NULL; /* RawKeyConvert calls MapRawKey which ignores ie_NextEvent anyhow */
-    return RawKeyConvert(&eventnative, buffer, length, NULL);
-}
-MAKE_PROXY_ARG_5(RawKeyConvert)
-
-#include <proto/cybergraphics.h>
-#include "abiv0/graphics/graphics_rastports.h"
-
-struct ExecBaseV0 *CyberGfx_SysBaseV0;
-
-BPTR abiv0_CyberGfx_ExpungeLib(struct LibraryV0 *extralhV0, struct LibraryV0 *CyberGfxBaseV0)
-{
-    /* Call Remove on library base */
-    CALL32_ARG_2_NR(__AROS_GETVECADDRV0(CyberGfx_SysBaseV0, 42), CyberGfxBaseV0, (APTR32)(IPTR)CyberGfx_SysBaseV0);
-    return BNULL;
-}
-MAKE_PROXY_ARG_2(CyberGfx_ExpungeLib)
-
-ULONG abiv0_FillPixelArray(struct RastPortV0 *rp, UWORD destx, UWORD desty, UWORD width, UWORD height, ULONG pixel)
-{
-    struct RastPort *rpnative = RastPortV0_getnative(rp);
-    return FillPixelArray(rpnative, destx, desty, width, height, pixel);
-}
-MAKE_PROXY_ARG_6(FillPixelArray)
-
-ULONG abiv0_WritePixelArrayAlpha(APTR src, UWORD srcx, UWORD srcy, UWORD srcmod, struct RastPortV0 *rp,
-    UWORD destx, UWORD desty, UWORD width, UWORD height, ULONG globalalpha, struct LibraryV0 *CyberGfxBaseV0)
-{
-    struct RastPort *rpnative = RastPortV0_getnative(rp);
-    ULONG _ret;
-    BITMAPLAYERPRE
-
-    if (rpnative->BitMap == NULL)
-    {
-        /* RNOTunes uses locally created RastPort */
-        recreateNativeRastPortBitMap(rp, rpnative, &bmtmp);
-        clearBM = TRUE;
-    }
-
-    if (rpnative->Layer == NULL && rp->Layer != (APTR32)(IPTR)NULL)
-    {
-        /* RNOTunes uses locally created RastPort */
-        rpnative->Layer = ((struct LayerProxy *)(IPTR)rp->Layer)->native;
-        clearL = TRUE;
-    }
-
-    _ret = WritePixelArrayAlpha(src, srcx, srcy, srcmod, rpnative, destx, desty, width, height, globalalpha);
-
-    BITMAPLAYERPOST
-
-    return _ret;
-}
-MAKE_PROXY_ARG_12(WritePixelArrayAlpha)
-
-#include <proto/graphics.h>
-
-LONG abiv0_WriteLUTPixelArray(APTR srcRect, UWORD SrcX, UWORD SrcY, UWORD SrcMod, struct RastPortV0 *rp,
-    APTR CTable, UWORD DestX, UWORD DestY, UWORD SizeX, UWORD SizeY, UBYTE CTabFormat, struct LibraryV0 *CyberGfxBaseV0)
-{
-    struct RastPort *rpnative = RastPortV0_getnative(rp);
-    LONG _ret;
-    BITMAPLAYERPRE
-
-    if (rpnative->BitMap == NULL)
-    {
-        /* RNOTunes when showing AboutMUI */
-        recreateNativeRastPortBitMap(rp, rpnative, &bmtmp);
-        clearBM = TRUE;
-    }
-
-    _ret = WriteLUTPixelArray(srcRect, SrcX, SrcY, SrcMod, rpnative, CTable, DestX, DestY, SizeX, SizeY, CTabFormat);
-
-    BITMAPLAYERPOST
-
-    return _ret;
-}
-MAKE_PROXY_ARG_12(WriteLUTPixelArray)
-
-ULONG abiv0_WritePixelArray(APTR src, UWORD srcx, UWORD srcy, UWORD srcmod, struct RastPortV0 *rp,
-    UWORD destx, UWORD desty, UWORD width, UWORD height, UBYTE srcformat, struct LibraryV0 *CyberGfxBaseV0)
-{
-    struct RastPort *rpnative = RastPortV0_getnative(rp);
-    ULONG _ret;
-    BITMAPLAYERPRE
-
-    if (rpnative == NULL)
-    {
-        /* Crossboard_Live drawing on custom public screen */
-        rpnative = RastPortV0_createcompanion(rp);
-    }
-
-    if (rpnative->BitMap == NULL)
-    {
-        /* Soliton operates on locally created RastPort */
-        /* picture.datatype uses locally created RastPort */
-        recreateNativeRastPortBitMap(rp, rpnative, &bmtmp);
-        clearBM = TRUE;
-    }
-
-    _ret = WritePixelArray(src, srcx, srcy, srcmod, rpnative, destx, desty, width, height, srcformat);
-
-    BITMAPLAYERPOST
-
-    return _ret;
-}
-MAKE_PROXY_ARG_12(WritePixelArray)
-
-LONG abiv0_WriteRGBPixel(struct RastPortV0 *rp, UWORD x, UWORD y, ULONG pixel, struct LibraryV0 *CyberGfxBaseV0)
-{
-    struct RastPort *rpnative = RastPortV0_getnative(rp);
-    LONG _ret;
-
-    _ret = WriteRGBPixel(rpnative, x, y, pixel);
-
-    return _ret;
-}
-MAKE_PROXY_ARG_5(WriteRGBPixel)
-
-ULONG abiv0_ReadPixelArray(APTR dst, UWORD dstx, UWORD dsty, UWORD dstmod, struct RastPortV0 *rp,
-    UWORD srcx, UWORD srcy, UWORD width, UWORD height, UBYTE dstformat, struct LibraryV0 *CyberGfxBaseV0)
-{
-    struct RastPort *rpnative = RastPortV0_getnative(rp);
-    return ReadPixelArray(dst, dstx, dsty, dstmod, rpnative, srcx, srcy, width, height, dstformat);
-}
-MAKE_PROXY_ARG_12(ReadPixelArray)
-
-#include "abiv0/include/utility/structures.h"
-
-VOID abiv0_ProcessPixelArray(struct RastPortV0 *rp, ULONG destX, ULONG destY, ULONG sizeX, ULONG sizeY, ULONG operation,
-        LONG value, struct TagItemV0 *taglist, struct LibraryV0 *CyberGfxBaseV0)
-{
-    struct RastPort *rpnative = RastPortV0_getnative(rp);
-    BITMAPLAYERPRE
-
-    if (rpnative->BitMap == NULL)
-    {
-        /* dtpic.mui uses locally created RastPort */
-        recreateNativeRastPortBitMap(rp, rpnative, &bmtmp);
-        clearBM = TRUE;
-    }
-
-    ProcessPixelArray(rpnative, destX, destY, sizeX, sizeY, operation, value, NULL);
-
-    BITMAPLAYERPOST
-}
-MAKE_PROXY_ARG_12(ProcessPixelArray)
-
-BOOL abiv0_IsCyberModeID(ULONG modeID, struct LibraryV0 *CyberGfxBaseV0)
-{
-    return IsCyberModeID(modeID);
-}
-MAKE_PROXY_ARG_2(IsCyberModeID)
-
-ULONG abiv0_BestCModeIDTagList(struct TagItemV0 * tags, struct LibraryV0 *CyberGfxBaseV0)
-{
-    ULONG _ret;
-
-    struct TagItem *tagListNative = CloneTagItemsV02Native(tags);
-
-    struct TagItem *tagNative = tagListNative;
-
-    _ret = BestCModeIDTagList(tagListNative);
-
-    FreeClonedV02NativeTagItems(tagListNative);
-
-    return _ret;
-}
-MAKE_PROXY_ARG_2(BestCModeIDTagList)
-
-ULONG abiv0_GetCyberIDAttr(ULONG attribute, ULONG DisplayModeID, struct LibraryV0 *CyberGfxBaseV0)
-{
-    return GetCyberIDAttr(attribute, DisplayModeID);
-}
-MAKE_PROXY_ARG_3(GetCyberIDAttr)
-
-ULONG abiv0_GetCyberMapAttr(struct BitMapV0 *bitMap, ULONG attribute, struct LibraryV0 *CyberGfxBaseV0)
-{
-    struct BitMapProxy *proxy = (struct BitMapProxy *)bitMap;
-    return GetCyberMapAttr(proxy->native, attribute);
-}
-MAKE_PROXY_ARG_3(GetCyberMapAttr)
 
 BPTR LoadSeg32 (CONST_STRPTR name, struct DosLibrary *DOSBase);
 
@@ -510,112 +153,27 @@ LONG emu_argsize = 0;
 
 // asm("int3");
 
-void CyberGfx_Unhandled_init(struct LibraryV0 *abiv0CyberGfxBase);
-void Layers_Unhandled_init(struct LibraryV0 *abiv0LayersBase);
-
 LONG_FUNC run_emulation(CONST_STRPTR program_path)
 {
     TEXT path[64];
     TEXT currdir[256];
-    UWORD negsize, possize, lastlvo;
-    APTR tmpmem;
 
     /* Init ROM */
     struct ExecBaseV0 *SysBaseV0 = init_exec();
 
-    /* timer.device */
-    lastlvo = 12;
-    negsize = (lastlvo + 1) * sizeof(struct JumpVecV0);
-    possize = sizeof(struct DeviceProxy);
-    tmpmem  = abiv0_AllocMem(negsize + possize, MEMF_CLEAR, SysBaseV0);
-    abiv0TimerBase = (tmpmem + negsize);
-        /* Set all LVO addresses to their number so that code jumps to "number" of the LVO and crashes */
-    for (int i = 5; i <= lastlvo; i++) __AROS_SETVECADDRV0(abiv0TimerBase, i, (APTR32)(IPTR)i + 1100);
-    __AROS_SETVECADDRV0(abiv0TimerBase, 11, (APTR32)(IPTR)proxy_GetSysTime);
-    __AROS_SETVECADDRV0(abiv0TimerBase,  8, (APTR32)(IPTR)proxy_SubTime);
-    __AROS_SETVECADDRV0(abiv0TimerBase,  7, (APTR32)(IPTR)proxy_AddTime);
-    __AROS_SETVECADDRV0(abiv0TimerBase,  9, (APTR32)(IPTR)proxy_CmpTime);
-    abiv0TimerBase->type                        = DEVPROXY_TYPE_TIMER;
-    abiv0TimerBase->base.dd_Library.lib_NegSize = negsize;
-    abiv0TimerBase->base.dd_Library.lib_PosSize = possize;
+    init_timer(SysBaseV0);
 
-    /* input.device */
-    lastlvo = 7;
-    negsize = (lastlvo + 1) * sizeof(struct JumpVecV0);
-    possize = sizeof(struct DeviceProxy);
-    tmpmem  = abiv0_AllocMem(negsize + possize, MEMF_CLEAR, SysBaseV0);
-    abiv0InputBase = (tmpmem + negsize);
-    /* Set all LVO addresses to their number so that code jumps to "number" of the LVO and crashes */
-    for (int i = 5; i <= lastlvo; i++) __AROS_SETVECADDRV0(abiv0InputBase, i, (APTR32)(IPTR)i + 1150);
-    __AROS_SETVECADDRV0(abiv0InputBase,  7, (APTR32)(IPTR)proxy_PeekQualifier);
-    abiv0InputBase->type                        = DEVPROXY_TYPE_INPUT;
-    abiv0InputBase->base.dd_Library.lib_NegSize = negsize;
-    abiv0InputBase->base.dd_Library.lib_PosSize = possize;
+    init_input(SysBaseV0);
 
-    /* console.device */
-    lastlvo = 12;
-    negsize = (lastlvo + 1) * sizeof(struct JumpVecV0);
-    possize = sizeof(struct DeviceProxy);
-    tmpmem  = abiv0_AllocMem(negsize + possize, MEMF_CLEAR, SysBaseV0);
-    abiv0ConsoleBase = (tmpmem + negsize);
-    /* Set all LVO addresses to their number so that code jumps to "number" of the LVO and crashes */
-    for (int i = 5; i <= lastlvo; i++) __AROS_SETVECADDRV0(abiv0ConsoleBase, i, (APTR32)(IPTR)i + 1200);
-    __AROS_SETVECADDRV0(abiv0ConsoleBase,  8, (APTR32)(IPTR)proxy_RawKeyConvert);
-    abiv0ConsoleBase->type                        = DEVPROXY_TYPE_CONSOLE;
-    abiv0ConsoleBase->base.dd_Library.lib_NegSize = negsize;
-    abiv0ConsoleBase->base.dd_Library.lib_PosSize = possize;
+    init_console(SysBaseV0);
 
     init_dos(SysBaseV0);
 
     init_graphics(SysBaseV0);
 
-    NewRawDoFmt("LIBSV0:partial/layers.library", RAWFMTFUNC_STRING, path);
-    BPTR layersseg = LoadSeg32(path, DOSBase);
-    struct ResidentV0 *layersres = findResident(layersseg, NULL);
-    struct LibraryV0 *abiv0LayersBase = shallow_InitResident32(layersres, layersseg, SysBaseV0);
-    Layers_SysBaseV0 = SysBaseV0;
-    /* Remove all vectors for now */
-    for (int i = 1; i <= 45; i++) __AROS_SETVECADDRV0(abiv0LayersBase, i, 0);
-    /* Set all unhandled LVO addresses to a catch function */
-    Layers_Unhandled_init((struct LibraryV0 *)abiv0LayersBase);
-    __AROS_SETVECADDRV0(abiv0LayersBase,   1, (APTR32)(IPTR)proxy_Layers_OpenLib);
-    __AROS_SETVECADDRV0(abiv0LayersBase,   2, (APTR32)(IPTR)proxy_Layers_CloseLib);
-    __AROS_SETVECADDRV0(abiv0LayersBase,   3, (APTR32)(IPTR)proxy_Layers_ExpungeLib);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  29, (APTR32)(IPTR)proxy_InstallClipRegion);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  20, (APTR32)(IPTR)proxy_LockLayerInfo);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  23, (APTR32)(IPTR)proxy_UnlockLayerInfo);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  16, (APTR32)(IPTR)proxy_LockLayer);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  17, (APTR32)(IPTR)proxy_UnlockLayer);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  14, (APTR32)(IPTR)proxy_EndUpdate);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  13, (APTR32)(IPTR)proxy_BeginUpdate);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  36, (APTR32)(IPTR)proxy_DoHookClipRects);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  22, (APTR32)(IPTR)proxy_WhichLayer);
-    __AROS_SETVECADDRV0(abiv0LayersBase,  24, (APTR32)(IPTR)proxy_NewLayerInfo);
+    init_layers(SysBaseV0);
 
-    NewRawDoFmt("LIBSV0:partial/cybergraphics.library", RAWFMTFUNC_STRING, path);
-    BPTR cgfxseg = LoadSeg32(path, DOSBase);
-    struct ResidentV0 *cgfxres = findResident(cgfxseg, NULL);
-    struct LibraryV0 *abiv0CyberGfxBase = shallow_InitResident32(cgfxres, cgfxseg, SysBaseV0);
-    CyberGfx_SysBaseV0 = SysBaseV0;
-    /* Remove all vectors for now (leave LibOpen/LibClose) */
-    const ULONG cybergraphicsjmpsize = 38 * sizeof(APTR32);
-    APTR32 *cybergraphicsjmp = AllocMem(cybergraphicsjmpsize, MEMF_CLEAR);
-    CopyMem((APTR)abiv0CyberGfxBase - cybergraphicsjmpsize, cybergraphicsjmp, cybergraphicsjmpsize);
-    for (int i = 3; i <= 38; i++) __AROS_SETVECADDRV0(abiv0CyberGfxBase, i, 0);
-    /* Set all unhandled LVO addresses to a catch function */
-    CyberGfx_Unhandled_init((struct LibraryV0 *)abiv0CyberGfxBase);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase,  3, (APTR32)(IPTR)proxy_CyberGfx_ExpungeLib);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 25, (APTR32)(IPTR)proxy_FillPixelArray);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 36, (APTR32)(IPTR)proxy_WritePixelArrayAlpha);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 33, (APTR32)(IPTR)proxy_WriteLUTPixelArray);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 21, (APTR32)(IPTR)proxy_WritePixelArray);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 38, (APTR32)(IPTR)proxy_ProcessPixelArray);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase,  9, (APTR32)(IPTR)proxy_IsCyberModeID);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 10, (APTR32)(IPTR)proxy_BestCModeIDTagList);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 17, (APTR32)(IPTR)proxy_GetCyberIDAttr);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 16, (APTR32)(IPTR)proxy_GetCyberMapAttr);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 20, (APTR32)(IPTR)proxy_ReadPixelArray);
-    __AROS_SETVECADDRV0(abiv0CyberGfxBase, 19, (APTR32)(IPTR)proxy_WriteRGBPixel);
+    init_cybergraphics(SysBaseV0);
 
     init_intuition(SysBaseV0, abiv0TimerBase);
 
@@ -667,19 +225,16 @@ LONG_FUNC run_emulation(CONST_STRPTR program_path)
     exec_force_expunge(SysBaseV0, "stdlib.library");
 
     /* Finish expunge for partial libraries */
-    UnLoadSeg(cgfxseg);
-    UnLoadSeg(layersseg);
+    exit_cybergraphics();
 
+    exit_layers();
     exit_intuition();
     exit_graphics();
     exit_dos();
 
-    abiv0_FreeMem((APTR)((IPTR)abiv0ConsoleBase - abiv0ConsoleBase->base.dd_Library.lib_NegSize),
-        abiv0ConsoleBase->base.dd_Library.lib_NegSize + abiv0ConsoleBase->base.dd_Library.lib_PosSize, SysBaseV0);
-    abiv0_FreeMem((APTR)((IPTR)abiv0InputBase - abiv0InputBase->base.dd_Library.lib_NegSize),
-        abiv0InputBase->base.dd_Library.lib_NegSize + abiv0InputBase->base.dd_Library.lib_PosSize, SysBaseV0);
-    abiv0_FreeMem((APTR)((IPTR)abiv0TimerBase - abiv0TimerBase->base.dd_Library.lib_NegSize),
-        abiv0TimerBase->base.dd_Library.lib_NegSize + abiv0TimerBase->base.dd_Library.lib_PosSize, SysBaseV0);
+    exit_console(SysBaseV0);
+    exit_input(SysBaseV0);
+    exit_timer(SysBaseV0);
 
     exit_exec();
 }

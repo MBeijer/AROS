@@ -1,12 +1,20 @@
 #ifndef HARDWARE_XHCI_H
 #define HARDWARE_XHCI_H
 /*
-    Copyright (C) 2023, The AROS Development Team. All rights reserved.
+    Copyright (C) 2023-2026, The AROS Development Team. All rights reserved.
  
-    Desc: XHCI USB Controllers specific definitions
+    Desc: xHCI USB Controllers specific definitions
 */
 
 #include <exec/types.h>
+
+/*
+ * Every field below sits at a naturally aligned offset already, so the
+ * packing changes no layout - but on its own it tells the compiler to
+ * assume nothing, and a strict alignment target then splits each access
+ * into bytes. A register written a byte at a time is not written at all.
+ */
+#define __xhci_hw                               __packed __attribute__((aligned(4)))
 
 #define ALIGN_XHCI_16                           16
 #define ALIGN_XHCI_32                           32
@@ -34,7 +42,7 @@ struct xhci_address {
             ULONG               addr_hi;
         };
     };
-}  __packed;
+}  __xhci_hw;
 
 
 /*
@@ -54,7 +62,7 @@ struct xhci_hccapr {
     ULONG                       dboff;                                      // (L) Doorbell Offset
     ULONG                       rrsoff;                                     // (L) Runtime Register Space Offset
     ULONG                       hccparams2;                                 // (L) Capability Params 2
-}  __packed;
+}  __xhci_hw;
 
 #define XHCIB_HCCPARAMS1_AC64                   0
 #define XHCIF_HCCPARAMS1_AC64                   (1 << XHCIB_HCCPARAMS1_AC64)
@@ -67,6 +75,11 @@ struct xhci_hccapr {
 #define XHCIS_HCCPARAMS1_ECP                    16
 #define XHCI_HCCPARAMS1_ECP_SMASK               0xFFFF
 #define XHCI_HCCPARAMS1_ECP_MASK                (XHCI_HCCPARAMS1_ECP_SMASK << XHCIS_HCCPARAMS1_ECP)
+
+#define XHCIB_HCCPARAMS2_CPSM                   30
+#define XHCIF_HCCPARAMS2_CPSM                   (1 << XHCIB_HCCPARAMS2_CPSM)
+#define XHCIB_HCCPARAMS2_PRS                    31
+#define XHCIF_HCCPARAMS2_PRS                    (1 << XHCIB_HCCPARAMS2_PRS)
 
 /*
  * Host Controller Operational Registers
@@ -86,7 +99,7 @@ struct xhci_hcopr {
     // Device Context Base Address Array Pointer
     struct xhci_address         dcbaap;
     ULONG                       config;
-}  __packed;
+}  __xhci_hw;
 
 #define XHCIB_USBCMD_RS                         0
 #define XHCIF_USBCMD_RS                         (1 << XHCIB_USBCMD_RS)
@@ -134,7 +147,7 @@ struct xhci_hcopr {
 struct xhci_dbr
 {
     ULONG                       db;
-}  __packed;
+}  __xhci_hw;
 
 /*
  * Runtime Register Space
@@ -142,7 +155,7 @@ struct xhci_dbr
 struct xhci_rrs
 {
     ULONG                       mfindex;
-}  __packed;
+}  __xhci_hw;
 
 /*
  * Port Registers
@@ -156,7 +169,7 @@ struct xhci_pr
     ULONG                       portpmsc;
     ULONG                       portli;
     ULONG                       porthlpmc;
-}  __packed;
+}  __xhci_hw;
 
 #define XHCIB_PR_PORTSC_CCS                     0
 #define XHCIF_PR_PORTSC_CCS                     (1 << XHCIB_PR_PORTSC_CCS)
@@ -202,10 +215,16 @@ struct xhci_pr
 #define XHCIS_PR_PORTSC_SPEED                   10
 #define XHCI_PR_PORTSC_SPEED_SMASK              0xF
 #define XHCI_PR_PORTSC_SPEED_MASK               (XHCI_PR_PORTSC_SPEED_SMASK << XHCIS_PR_PORTSC_SPEED)
-#define XHCIF_PR_PORTSC_FULLSPEED               (1 << XHCIS_PR_PORTSC_SPEED)
-#define XHCIF_PR_PORTSC_LOWSPEED                (2 << XHCIS_PR_PORTSC_SPEED)
-#define XHCIF_PR_PORTSC_HIGHSPEED               (3 << XHCIS_PR_PORTSC_SPEED)
-#define XHCIF_PR_PORTSC_SUPERSPEED              (4 << XHCIS_PR_PORTSC_SPEED)
+#define XHCIB_PR_PORTSC_FULLSPEED               1
+#define XHCIF_PR_PORTSC_FULLSPEED               (XHCIB_PR_PORTSC_FULLSPEED << XHCIS_PR_PORTSC_SPEED)
+#define XHCIB_PR_PORTSC_LOWSPEED                2
+#define XHCIF_PR_PORTSC_LOWSPEED                (XHCIB_PR_PORTSC_LOWSPEED << XHCIS_PR_PORTSC_SPEED)
+#define XHCIB_PR_PORTSC_HIGHSPEED               3
+#define XHCIF_PR_PORTSC_HIGHSPEED               (XHCIB_PR_PORTSC_HIGHSPEED << XHCIS_PR_PORTSC_SPEED)
+#define XHCIB_PR_PORTSC_SUPERSPEED              4
+#define XHCIF_PR_PORTSC_SUPERSPEED              (XHCIB_PR_PORTSC_SUPERSPEED << XHCIS_PR_PORTSC_SPEED)
+#define XHCIB_PR_PORTSC_SUPERSPEEDPLUS          5
+#define XHCIF_PR_PORTSC_SUPERSPEEDPLUS          (XHCIB_PR_PORTSC_SUPERSPEEDPLUS << XHCIS_PR_PORTSC_SPEED)
 
 /*
  * interrupter registers
@@ -219,7 +238,7 @@ struct xhci_ir
     // Command Ring Control Register
     struct xhci_address         erstba;
     struct xhci_address         erdp;
-}  __packed;
+}  __xhci_hw;
 
 #define XHCIB_IR_IMAN_IP                        0
 #define XHCIF_IR_IMAN_IP                        (1 << XHCIB_IR_IMAN_IP)
@@ -235,7 +254,15 @@ struct xhci_ir
  * Extended Capabilities
  */
 
-/* 
+/* Extended Capability Header */
+#define XHCIS_EXT_CAP_NEXT                      8
+#define XHCI_EXT_CAP_NEXT_MASK                  0xFF
+
+/* Extended Capability IDs */
+#define XHCI_EXT_CAP_ID_LEGACY_SUPPORT          0x01
+#define XHCI_EXT_CAP_ID_SUPPORTED_PROTOCOL      0x02
+
+/*
  * USB Legacy Support Capability (USBLEGSUP)
  */
 #define XHCIB_USBLEGSUP_BIOSOWNED               16
@@ -247,10 +274,25 @@ struct xhci_ir
  * USB Legacy Support Control/Status (USBLEGCTLSTS)
  */
 #define XHCIB_USBLEGCTLSTS_SMI_ENABLE           0
-#define XHCIF_USBLEGCTLSTS_SMI_ENABLE           (1 << XHCIB_SMI_ENABLE)
-#define XHCIB_USBLEGCTLSTS_SMI_ONHOSTERR_ENABLE 4
-#define XHCIF_USBLEGCTLSTS_SMI_ONHOSTERR        (1 << XHCIB_SMI_ONHOSTERR)
+#define XHCIF_USBLEGCTLSTS_SMI_ENABLE           (1u << XHCIB_USBLEGCTLSTS_SMI_ENABLE)
 
+#define XHCIB_USBLEGCTLSTS_SMI_ONHOSTERR_ENABLE 4
+#define XHCIF_USBLEGCTLSTS_SMI_ONHOSTERR_ENABLE (1u << XHCIB_USBLEGCTLSTS_SMI_ONHOSTERR_ENABLE)
+
+/*
+ * Supported Protocol Capability
+ */
+#define XHCIS_XCP_NAMESTRING                    0
+#define XHCI_XCP_NAMESTRING_MASK                0xFFFF
+#define XHCIS_XCP_REV_MINOR                     16
+#define XHCI_XCP_REV_MINOR_MASK                 0xFF
+#define XHCIS_XCP_REV_MAJOR                     24
+#define XHCI_XCP_REV_MAJOR_MASK                 0xFF
+
+#define XHCIS_XCP_PORT_OFFSET                   0
+#define XHCI_XCP_PORT_OFFSET_MASK               0xFF
+#define XHCIS_XCP_PORT_COUNT                    8
+#define XHCI_XCP_PORT_COUNT_MASK                0xFF
 
 /*
  * Transfer Request Block
@@ -263,12 +305,15 @@ struct xhci_trb
     struct xhci_address         dbp;
     ULONG                       tparams;
     ULONG                       flags;
-}  __packed;
+}  __xhci_hw;
 
 #define TRBB_FLAG_C                             0
 #define TRBF_FLAG_C                             (1 << TRBB_FLAG_C)
 #define TRBB_FLAG_ENT                           1
 #define TRBF_FLAG_ENT                           (1 << TRBB_FLAG_ENT)
+/* Link TRBs reuse the ENT bit position as the Toggle Cycle flag */
+#define TRBB_FLAG_TC                            TRBB_FLAG_ENT
+#define TRBF_FLAG_TC                            TRBF_FLAG_ENT
 #define TRBB_FLAG_ISP                           2
 #define TRBF_FLAG_ISP                           (1 << TRBB_FLAG_ISP)
 #define TRBB_FLAG_NS                            3
@@ -281,6 +326,18 @@ struct xhci_trb
 #define TRBF_FLAG_IDT                           (1 << TRBB_FLAG_IDT)
 #define TRBB_FLAG_BEI                           9
 #define TRBF_FLAG_BEI                           (1 << TRBB_FLAG_BEI)
+#define TRBB_FLAG_SIA                           31
+#define TRBF_FLAG_SIA                           (1u << TRBB_FLAG_SIA)
+
+/* Transfer Burst Count (TBC) - 2 bits */
+#define TRBS_FLAG_TBC                           16
+#define TRB_FLAG_TBC_SMASK                      0x3
+#define TRBF_FLAG_TBC(x)                        (((ULONG)(x) & TRB_FLAG_TBC_SMASK) << TRBS_FLAG_TBC)
+
+/* Frame ID (11 bits) */
+#define TRBS_FLAG_FRAMEID                       20
+#define TRB_FLAG_FRAMEID_SMASK                  0x7FF
+#define TRBF_FLAG_FRAMEID(x)                    (((ULONG)(x) & TRB_FLAG_FRAMEID_SMASK) << TRBS_FLAG_FRAMEID)
 
 #define TRBS_FLAG_TYPE                          10
 #define TRB_FLAG_TYPE_SMASK                     0x3F
@@ -315,6 +372,11 @@ struct xhci_trb
 #define TRBF_FLAG_CRTYPE_DISABLE_SLOT           (TRBB_FLAG_CRTYPE_DISABLE_SLOT << TRBS_FLAG_TYPE)
 #define TRBB_FLAG_CRTYPE_ADDRESS_DEVICE         11
 #define TRBF_FLAG_CRTYPE_ADDRESS_DEVICE         (TRBB_FLAG_CRTYPE_ADDRESS_DEVICE << TRBS_FLAG_TYPE)
+/*
+ * Bit 9 is repurposed as BSR for ADDRESS_DEVICE command TRBs; it shares the
+ * same bit position as BEI on transfer TRBs.
+ */
+#define TRBF_FLAG_ADDRDEV_BSR                   TRBF_FLAG_BEI
 #define TRBB_FLAG_CRTYPE_CONFIGURE_ENDPOINT     12
 #define TRBF_FLAG_CRTYPE_CONFIGURE_ENDPOINT     (TRBB_FLAG_CRTYPE_CONFIGURE_ENDPOINT << TRBS_FLAG_TYPE)
 #define TRBB_FLAG_CRTYPE_EVALUATE_CONTEXT       13
@@ -359,9 +421,10 @@ struct xhci_trb
 
 /* Data Stage TRB params & Flags */
 #define TRBS_TPARAMS_DS_TRBLEN                  0
-#define TRB_TPARAMS_DS_TRBLEN_SMASK             0xFFFF
+#define TRB_TPARAMS_DS_TRBLEN_SMASK             0x1FFFFu                                        /* 17 bits      */
+#define TRB_TPARAMS_TRBLEN_MAX                  0x10000u                                        /* 64K          */
 #define TRBS_TPARAMS_DS_TDSIZE                  17
-#define TRB_TPARAMS_DS_TDSIZE_SMASK             0xF
+#define TRB_TPARAMS_DS_TDSIZE_SMASK             0x1Fu                                           /* 5 bits       */
 #define TRB_TPARAMS_DS_TDSIZE_MASK              (TRB_TPARAMS_DS_TDSIZE_SMASK << TRBS_TPARAMS_DS_TDSIZE)
 #define TRBB_FLAG_DS_DIR                        16
 #define TRBF_FLAG_DS_DIR                        (1 << TRBB_FLAG_DS_DIR)
@@ -374,9 +437,9 @@ struct xhci_trb_port_status
     UBYTE                       rsvd1[3];
     UBYTE                       port;
     UBYTE                       rsvd2[7];
-    UBYTE                       code;                                                         // Completion code
-    UBYTE                       flags;                                                        // Flags
-    UBYTE                       type;                                                         // Type
+    UBYTE                       code;                                                           // Completion code
+    UBYTE                       flags;                                                          // Flags
+    UBYTE                       type;                                                           // Type
     UWORD                       rsvd3;
 }  __packed;
 
@@ -386,7 +449,57 @@ struct xhci_ce
     struct xhci_address         dbp;
     ULONG                       cparams;
     ULONG                       flags;
-}  __packed;
+}  __xhci_hw;
+
+/* TRB Completion Codes */
+enum {
+    TRB_CC_INVALID                        = 0,
+    TRB_CC_SUCCESS                        = 1,
+    TRB_CC_DATA_BUFFER_ERROR              = 2,
+    TRB_CC_BABBLE_DETECTED_ERROR          = 3,
+    TRB_CC_USB_TRANSACTION_ERROR          = 4,
+    TRB_CC_TRB_ERROR                      = 5,
+    TRB_CC_STALL_ERROR                    = 6,
+    TRB_CC_RESOURCE_ERROR                 = 7,
+    TRB_CC_BANDWIDTH_ERROR                = 8,
+    TRB_CC_NO_SLOTS_AVAILABLE_ERROR       = 9,
+    TRB_CC_INVALID_STREAM_TYPE_ERROR      = 10,
+    TRB_CC_SLOT_NOT_ENABLED_ERROR         = 11,
+    TRB_CC_ENDPOINT_NOT_ENABLED_ERROR     = 12,
+    TRB_CC_SHORT_PACKET                   = 13,
+    TRB_CC_RING_UNDERRUN                  = 14,
+    TRB_CC_RING_OVERRUN                   = 15,
+    TRB_CC_VF_EVENT_RING_FULL_ERROR       = 16,
+    TRB_CC_PARAMETER_ERROR                = 17,
+    TRB_CC_BANDWIDTH_OVERRUN_ERROR        = 18,
+    TRB_CC_CONTEXT_STATE_ERROR            = 19,
+    TRB_CC_NO_PING_RESPONSE_ERROR         = 20,
+    TRB_CC_EVENT_RING_FULL_ERROR          = 21,
+    TRB_CC_INCOMPATIBLE_DEVICE_ERROR      = 22,
+    TRB_CC_MISSED_SERVICE_ERROR           = 23,
+    TRB_CC_COMMAND_RING_STOPPED           = 24,
+    TRB_CC_COMMAND_ABORTED                = 25,
+    TRB_CC_STOPPED                        = 26,
+    TRB_CC_STOPPED_LENGTH_INVALID         = 27,
+    TRB_CC_STOPPED_SHORT_PACKET           = 28,
+    TRB_CC_MAX_EXIT_LATENCY_TOO_LARGE     = 29,
+    TRB_CC_ISOCH_BUFFER_OVERRUN           = 31,
+    TRB_CC_EVENT_LOST                     = 32,
+    TRB_CC_UNSUPPORTED_REQUEST_ERROR      = 33,
+    TRB_CC_PREVIOUS_STREAM_STOPPED        = 34,
+    TRB_CC_NEXT_STREAM_STOPPED            = 35,
+    TRB_CC_STREAM_ID_ERROR                = 36,
+    TRB_CC_SECONDARY_BANDWIDTH_ERROR      = 37,
+    TRB_CC_SPLIT_TRANSACTION_ERROR        = 38,
+    /*
+     * Some host controllers report a distinct USB Disconnect completion
+     * code when an endpoint stops because the device vanished. Map this
+     * symbolic name to the generic USB Transaction Error value when the
+     * explicit code is not defined in the specification so callers can
+     * key on a stable identifier.
+     */
+    TRB_CC_USB_DISCONNECT_ERROR           = TRB_CC_USB_TRANSACTION_ERROR,
+};
 
 // Device related structures
 
@@ -395,7 +508,7 @@ struct xhci_slot
 {
     ULONG                       ctx[4];
     ULONG                       rsvd1[4];
-}  __packed;
+}  __xhci_hw;
 
 
 #define SLOTS_CTX_SPEED         20
@@ -407,6 +520,35 @@ struct xhci_slot
 #define SLOTF_CTX_HIGHSPEED     (SLOT_CTX_HIGHSPEED << SLOTS_CTX_SPEED)
 #define SLOT_CTX_SUPERSPEED     4
 #define SLOTF_CTX_SUPERSPEED    (SLOT_CTX_SUPERSPEED << SLOTS_CTX_SPEED)
+#define SLOT_CTX_ROUTE_MASK     0xFFFFF
+#define SLOTF_CTX_MTT           (1 << 25)
+#define SLOT_CTX_TT_SLOT_SHIFT  0
+#define SLOT_CTX_TT_PORT_SHIFT  8
+#define SLOT_CTX_TTT_SHIFT      16
+
+/* Slot Context DWORD3 fields (USB Device Address + Slot State) */
+#define XHCI_SLOTCTX3_DEVADDR_SHIFT   0
+#define XHCI_SLOTCTX3_DEVADDR_MASK    0xFFu
+#define XHCI_SLOTCTX3_SLOTSTATE_SHIFT 27
+#define XHCI_SLOTCTX3_SLOTSTATE_MASK  (0x1Fu << XHCI_SLOTCTX3_SLOTSTATE_SHIFT)
+
+/*
+ * Slot State field numeric encoding (Slot Context DW3[31:27]).
+ *
+ * The xHC maintains an internal "Enabled" slot state, but the Slot State
+ * field does not encode it distinctly. A value of 0 means "Disabled or
+ * Enabled" depending on controller internal state.
+ *
+ * Encoding:
+ *   0 = Disabled or Enabled
+ *   1 = Default
+ *   2 = Addressed
+ *   3 = Configured
+ */
+#define XHCI_SLOT_STATE_DISABLED_OR_ENABLED 0
+#define XHCI_SLOT_STATE_DEFAULT             1
+#define XHCI_SLOT_STATE_ADDRESSED           2
+#define XHCI_SLOT_STATE_CONFIGURED          3
 
 /* endpoint context */
 struct xhci_ep
@@ -415,10 +557,10 @@ struct xhci_ep
     struct xhci_address         deq;
     ULONG                       length;
     ULONG                       rsvd1[3];
-}  __packed;
+}  __xhci_hw;
 
-#define EPS_CTX_CERR            1
-#define EP_CTX_CERR_MASK        0x3
+#define EPS_CTX_CERR            0   /* starting bit */
+#define EP_CTX_CERR_MASK        0x3 /* value 3 => 3 retries */
 #define EPS_CTX_TYPE            3
 #define EPF_CTX_TYPE_ISOCH_O    (1 << EPS_CTX_TYPE)
 #define EPF_CTX_TYPE_BULK_O     (2 << EPS_CTX_TYPE)
@@ -428,6 +570,8 @@ struct xhci_ep
 #define EPF_CTX_TYPE_BULK_I     (6 << EPS_CTX_TYPE)
 #define EPF_CTX_TYPE_INTR_I     (7 << EPS_CTX_TYPE)
 #define EPS_CTX_PACKETMAX       16
+#define EPS_CTX_MULT            8
+#define EPF_CTX_MULT(x)         (((x) & 0x3) << EPS_CTX_MULT)
 
 #define EPB_CTX_DEQ_DCS         0
 #define EPF_CTX_DEQ_DCS         (1 << EPB_CTX_DEQ_DCS)
@@ -438,13 +582,13 @@ struct xhci_inctx
     ULONG                       dcf;
     ULONG                       acf;
     ULONG                       rsvd1[6];
-}  __packed;
+}  __xhci_hw;
 
 /* event ring segment */
 struct xhci_er_seg {
     struct xhci_address         ptr;
     ULONG                       size;
     ULONG                       rsvd1;
-} __packed;
+} __xhci_hw;
 
 #endif /* HARDWARE_XHCI_H */
