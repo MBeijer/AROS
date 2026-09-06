@@ -123,6 +123,7 @@ static void IconLabel(void);                                            // add l
 // App data...
  
 #define SUM_ICON  200
+#define SUM_LEVELS 11
 #define ICON_ACTIVE (1<<7)
 #define SELECTED_ICON (1<<6)
 
@@ -701,6 +702,24 @@ EndNotify(WallpaperNotRequest);
 }
 
 
+static STRPTR TrimStr(STRPTR s)
+{
+    STRPTR end;
+
+    while (*s == ' ' || *s == '\t')
+        s++;
+
+    if (*s == '\0')
+        return s;
+
+    end = s + strlen(s) - 1;
+    while (end > s && (*end == ' ' || *end == '\t'))
+        *end-- = '\0';
+
+    return s;
+}
+
+
 static BOOL ReadPrefs(void)
 {
     BPTR Prefs;
@@ -724,7 +743,7 @@ static BOOL ReadPrefs(void)
 
         if((MyScreen=LockPubScreen(NULL)))
         {
-            while(FGets(Prefs, Icons[IconCounter].Icon_Path, 255) )    //&& IconCounter < SUM_ICON)
+            while(FGets(Prefs, Icons[IconCounter].Icon_Path, 255) && IconCounter < SUM_ICON)
             {
                 NumberCharacters = strlen(Icons[IconCounter].Icon_Path);
                 Icons[IconCounter].Icon_Path[NumberCharacters-1] = '\0';
@@ -734,21 +753,43 @@ static BOOL ReadPrefs(void)
                         NumberCharacters = 20;
                     Icons[IconCounter].Icon_Path[19] = '\0';
 
-                    for(x=1; x<NumberCharacters; x++)
+                    /* Keep the number of submenus within Levels[SUM_LEVELS];
+                       two slots are reserved for Settings and Quit. */
+                    if(LevelCounter < SUM_LEVELS - 2)
                     {
-                        Levels[LevelCounter].Level_Name[x-1] = Icons[IconCounter].Icon_Path[x];
+                        for(x=1; x<NumberCharacters; x++)
+                        {
+                            Levels[LevelCounter].Level_Name[x-1] = Icons[IconCounter].Icon_Path[x];
+                        }
+
+                        strcpy(BufferList, Levels[LevelCounter].Level_Name);
+                        LengthText = IntuiTextLength(&Names);
+                        if(LengthText > Length)
+                            Length = LengthText;
+
+                        Levels[LevelCounter].Beginning = IconCounter;
+                        LevelCounter++;
                     }
-
-                    strcpy(BufferList, Levels[LevelCounter].Level_Name);
-                    LengthText = IntuiTextLength(&Names);
-                    if(LengthText > Length)
-                        Length = LengthText;
-
-                    Levels[LevelCounter].Beginning = IconCounter;
-                    LevelCounter++;
+                    else
+                    {
+                        printf("BoingIconBar: too many submenus, ignoring '%s'\n", Icons[IconCounter].Icon_Path);
+                    }
                 }
                 else
                 {
+                    STRPTR custom = NULL;
+                    char *semi;
+
+                    // Optional ";CustomName" suffix: use it as the icon label
+                    // and strip it from the path before loading the icon.
+                    semi = strchr(Icons[IconCounter].Icon_Path, ';');
+                    if (semi)
+                    {
+                        if (semi[1] != '\0')
+                            custom = TrimStr(semi + 1);
+                        *semi = '\0';
+                    }
+
                     if((Icon[IconCounter] = GetIconTags(Icons[IconCounter].Icon_Path,
                         ICONGETA_RemapIcon, FALSE,
                         TAG_DONE)))
@@ -773,7 +814,14 @@ static BOOL ReadPrefs(void)
 
                         // ---------------------- Extract Label from path to icon
 
-                        Icons[IconCounter].IK_Label = FilePart((Icons[IconCounter].Icon_Path));
+                        if (custom && *custom != '\0')
+                        {
+                            strncpy(Icons[IconCounter].IK_LabelBuf, custom, 63);
+                            Icons[IconCounter].IK_LabelBuf[63] = '\0';
+                            Icons[IconCounter].IK_Label = Icons[IconCounter].IK_LabelBuf;
+                        }
+                        else
+                            Icons[IconCounter].IK_Label = FilePart((Icons[IconCounter].Icon_Path));
 
                         // --------------------------------------------------
 
@@ -835,6 +883,7 @@ static BOOL ReadPrefs(void)
 static void LoadBackground(void)
 {
     LONG x;
+    IPTR iw, ih;
 
     STRPTR names[3] = {"Images:bibgfx/left",
         "Images:bibgfx/middle",
@@ -854,13 +903,34 @@ static void LoadBackground(void)
         {
             DoDTMethod (picture[x], NULL, NULL, DTM_PROCLAYOUT, NULL, DTSIF_NEWSIZE);
 
+            iw = 0;
+            ih = 0;
             GetDTAttrs (picture[x],
                 PDTA_DestBitMap,  (IPTR)&bm[x],
-                DTA_NominalHoriz, (IPTR)&BackgroundData[x].Width,
-                DTA_NominalVert,  (IPTR)&BackgroundData[x].Height,
+                DTA_NominalHoriz, (IPTR)&iw,
+                DTA_NominalVert,  (IPTR)&ih,
                 TAG_END);
+
+            BackgroundData[x].Width  = (LONG)iw;
+            BackgroundData[x].Height = (LONG)ih;
         }
     }
+}
+
+
+static void DrawBarTile(Object *obj, struct BitMap *bm, LONG x, LONG y, LONG w, LONG h)
+{
+    APTR dti;
+
+    dti = ObtainDTDrawInfoA(obj, NULL);
+    if (dti)
+    {
+        if (DrawDTObjectA(&RP_Buffer, obj, x, y, w, h, 0, 0, NULL) == FALSE)
+            BltBitMapRastPort(bm, 0, 0, &RP_Buffer, x, y, w, h, 0xC0);
+        ReleaseDTDrawInfo(obj, dti);
+    }
+    else
+        BltBitMapRastPort(bm, 0, 0, &RP_Buffer, x, y, w, h, 0xC0);
 }
 
 
@@ -896,13 +966,14 @@ static BOOL SetWindowParameters(void)
 
                 // ------------- Calculate lenght of Label
 
-                strcpy(IT_Labels, Icons[x].IK_Label);
+                strncpy(IT_Labels, Icons[x].IK_Label, sizeof(IT_Labels) - 1);
+                IT_Labels[sizeof(IT_Labels) - 1] = '\0';
 
-                for(z=strlen(Icons[x].IK_Label); z>1; z--)
+                for(z=strlen(IT_Labels); z>1; z--)
                 {
                     IT_Labels[z - 1] = '\0';
 
-                    if(IntuiTextLength(&Labels) < Icons[x].Icon_Width)
+                    if(IntuiTextLength(&Labels) < Icons[x].Icon_Width + Spacing)
                     {
                         Icons[x].IK_Label_Length = z;
                         break;
@@ -1271,62 +1342,42 @@ static BOOL OpenMainWindow(void)
         y = WindowWidth - BackgroundData[0].Width - BackgroundData[2].Width;
         a = y / BackgroundData[1].Width;
 
-        BltBitMapRastPort(bm[0],
-            0,
-            0,
-            &RP_Buffer,
+        DrawBarTile(picture[0], bm[0],
             0,
             WindowHeight - BackgroundData[0].Height,
             BackgroundData[0].Width,
-            BackgroundData[0].Height,
-            0xC0);
+            BackgroundData[0].Height);
 
         for(x=0; x<a; x++)
         {
-            BltBitMapRastPort(bm[1],
-                0,
-                0,
-                &RP_Buffer,
+            DrawBarTile(picture[1], bm[1],
                 BackgroundData[0].Width + x * BackgroundData[1].Width,
                 WindowHeight - BackgroundData[1].Height,
                 BackgroundData[1].Width,
-                BackgroundData[1].Height,
-                0xC0);
+                BackgroundData[1].Height);
         }
 
-        BltBitMapRastPort(bm[1],
-            0,
-            0,
-            &RP_Buffer,
+        DrawBarTile(picture[1], bm[1],
             BackgroundData[0].Width + x * BackgroundData[1].Width,
             WindowHeight - BackgroundData[1].Height,
             y - BackgroundData[1].Width * a,
-            BackgroundData[1].Height,
-            0xC0);
+            BackgroundData[1].Height);
 
-        BltBitMapRastPort(bm[2],
-            0,
-            0,
-            &RP_Buffer,
+        DrawBarTile(picture[2], bm[2],
             WindowWidth - BackgroundData[2].Width,
             WindowHeight - BackgroundData[2].Height,
             BackgroundData[2].Width,
-            BackgroundData[2].Height,
-            0xC0);
+            BackgroundData[2].Height);
         }
         else if(picture[1])
         {
             for(x=0; x<WindowWidth; x=x+BackgroundData[1].Width)
             {
-                BltBitMapRastPort(bm[1],
-                    0,
-                    0,
-                    &RP_Buffer,
+                DrawBarTile(picture[1], bm[1],
                     x,
                     WindowHeight - BackgroundData[1].Height,
                     BackgroundData[1].Width,
-                    BackgroundData[1].Height,
-                    0xC0);
+                    BackgroundData[1].Height);
             }
         }
 
@@ -1679,16 +1730,26 @@ static void ScreenResetCleanup(void)
             FreeDiskObject(Icon[x]);
             Icon[x]=NULL;
         }
-        Icons[x].Icon_Height  = 0;
-        Icons[x].Icon_Width = 0;
-        Icons[x].Icon_PositionX  = 0;
-        Icons[x].Icon_PositionY  = 0;
+        Icons[x].Icon_OK          = FALSE;
+        Icons[x].Icon_Height      = 0;
+        Icons[x].Icon_Width       = 0;
+        Icons[x].Icon_PositionX   = 0;
+        Icons[x].Icon_PositionY   = 0;
+        Icons[x].IK_Label_Length  = 0;
     }
 
     if(BMP_Buffer)
+    {
         FreeBitMap(BMP_Buffer);
+        BMP_Buffer = NULL;
+    }
     if(BMP_DoubleBuffer)
+    {
         FreeBitMap(BMP_DoubleBuffer);
+        BMP_DoubleBuffer = NULL;
+    }
+    RP_Buffer.BitMap = NULL;
+    RP_DoubleBuffer.BitMap = NULL;
 
     for(x=0; x<3; x++)
     {
@@ -1895,16 +1956,26 @@ static void Reload(void)
             FreeDiskObject(Icon[x]);
             Icon[x]=NULL;
         }
-        Icons[x].Icon_Height  = 0;
-        Icons[x].Icon_Width = 0;
-        Icons[x].Icon_PositionX  = 0;
-        Icons[x].Icon_PositionY  = 0;
+        Icons[x].Icon_OK          = FALSE;
+        Icons[x].Icon_Height      = 0;
+        Icons[x].Icon_Width       = 0;
+        Icons[x].Icon_PositionX   = 0;
+        Icons[x].Icon_PositionY   = 0;
+        Icons[x].IK_Label_Length  = 0;
     }
 
     if(BMP_Buffer)
+    {
         FreeBitMap(BMP_Buffer);
+        BMP_Buffer = NULL;
+    }
     if(BMP_DoubleBuffer)
+    {
         FreeBitMap(BMP_DoubleBuffer);
+        BMP_DoubleBuffer = NULL;
+    }
+    RP_Buffer.BitMap = NULL;
+    RP_DoubleBuffer.BitMap = NULL;
 
     if(ReadPrefs() == FALSE)
     {
@@ -1927,7 +1998,12 @@ static void IconLabel(void)
 
     for(x=Levels[CurrentLevel].Beginning; x<IconCounter; x++)
     {
-        for(y=0; y<Icons[x].IK_Label_Length; y++)
+        LONG labelLen = Icons[x].IK_Label_Length;
+
+        if (labelLen > (LONG)(sizeof(IT_Labels) - 1))
+            labelLen = (LONG)(sizeof(IT_Labels) - 1);
+
+        for(y=0; y<labelLen; y++)
         {
             IT_Labels[y] = Icons[x].IK_Label[y];
         }
