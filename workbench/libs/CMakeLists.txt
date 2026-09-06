@@ -92,6 +92,10 @@ if(AROS_WORKBENCH_LIBS_NATIVE_MODULES STREQUAL "${_aros_workbench_libs_native_mo
     FORCE
   )
 endif()
+# START LEGACY: these two adapters still own behavior not translated from their
+# manifests (MUI header generation and cgxvideo's compatibility flags).
+add_subdirectory(muimaster)
+# END LEGACY
 foreach(_aros_wb_lib_native_module IN LISTS AROS_WORKBENCH_LIBS_NATIVE_MODULES)
   # Legacy workbench/libs module links resolve through the shared library
   # surface (mui, m, stdlib, crt, ...), unlike many ROM-native modules that
@@ -100,8 +104,21 @@ foreach(_aros_wb_lib_native_module IN LISTS AROS_WORKBENCH_LIBS_NATIVE_MODULES)
   set(AROS_COMPILER_NATIVE_MODULE_AUTOLIBS
     "mui;arossupport;amiga;m;stdlib;crt;codesets;keymap;expansion;commodities;diskfont;asl;muimaster;datatypes;cybergraphics;workbench;icon;intuition;gadtools;layers;aros;partition;iffparse;graphics;locale;dos;utility;exec;autoinit;libinit"
   )
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_aros_wb_lib_native_module}/CMakeLists.txt")
-    add_subdirectory("${_aros_wb_lib_native_module}")
+  if(_aros_wb_lib_native_module STREQUAL "cgxvideo")
+    add_subdirectory(cgxvideo)
+    continue()
+  endif()
+  string(REPLACE "/" "-" _aros_wb_lib_target_id "${_aros_wb_lib_native_module}")
+  aros_register_mmake_genmodule_module(
+    "aros-workbench-libs-${_aros_wb_lib_target_id}-native"
+    MODULE_PATH "workbench/libs/${_aros_wb_lib_native_module}"
+  )
+  if(AROS_ENABLE_LEGACY_PIPELINE AND COMMAND aros_register_legacy_make_target)
+    aros_register_legacy_make_target(
+      "aros-workbench-libs-${_aros_wb_lib_target_id}"
+      "workbench-libs-${_aros_wb_lib_target_id}"
+      ${_aros_legacy_crosstools_dep}
+    )
   endif()
 endforeach()
 

@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 3.20)
+if(NOT AROS_CC OR NOT AROS_M_LIBRARY)
+  message(FATAL_ERROR "Pass AROS_CC and AROS_M_LIBRARY")
+endif()
+execute_process(COMMAND "${AROS_CC}" -print-prog-name=nm
+  OUTPUT_VARIABLE _nm OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+execute_process(COMMAND "${_nm}" --defined-only "${AROS_M_LIBRARY}"
+  OUTPUT_VARIABLE _symbols COMMAND_ERROR_IS_FATAL ANY)
+if(_symbols MATCHES "[ \t]__aros_libreq_MBase(\\.|[\r\n])")
+  message(FATAL_ERROR "m.library has an automatic dependency on itself; boot will recursively load it")
+endif()
+foreach(_implementation IN ITEMS _feclearexcept _fegetenv fegetenv __fe_dfl_env)
+  if(NOT _symbols MATCHES "[ \t]${_implementation}[\r\n]")
+    message(FATAL_ERROR "Math runtime implementation missing: ${_implementation}")
+  endif()
+endforeach()
+message(STATUS "Math runtime implementations are present without a self-library dependency")

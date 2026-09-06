@@ -37,6 +37,20 @@ option(AROS_BUILD_LHA "Build tools/lha with CMake" ON)
 
 include("${CMAKE_SOURCE_DIR}/cmake/AROSConfigSnapshot.cmake")
 include("${CMAKE_SOURCE_DIR}/cmake/AROSModule.cmake")
+set(AROS_NATIVE_CONFIG_FILE "" CACHE FILEPATH "Optional literal NAME=value configuration for native manifest readers")
+if(AROS_NATIVE_CONFIG_FILE)
+  get_filename_component(AROS_NATIVE_CONFIG_FILE "${AROS_NATIVE_CONFIG_FILE}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+  _aros_native_config(_aros_native_config)
+endif()
+include("${CMAKE_SOURCE_DIR}/cmake/AROSManifests.cmake")
+aros_collect_mmake_manifests(AROS_MMAKE_MANIFESTS)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/mmakefile" "${CMAKE_SOURCE_DIR}/mmake.config.in")
+add_custom_target(aros-manifest-reconfigure-check
+  COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/manifest-reconfigure"
+    -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_reconfigure.cmake"
+  VERBATIM)
+set_target_properties(aros-manifest-reconfigure-check PROPERTIES FOLDER "aros/tests")
 # START LEGACY: compatibility bridge options for legacy MetaMake/make flow.
 set(AROS_LEGACY_BUILD_DIR "${CMAKE_BINARY_DIR}/legacy-main" CACHE PATH "Build directory used for legacy configure+make wrapper targets")
 option(AROS_LEGACY_USE_NATIVE_MMAKE "Use CMake-built mmake binary when running legacy GNU make targets" OFF)
@@ -316,6 +330,12 @@ add_custom_target(
 )
 
 set(AROS_NATIVE_INCLUDE_DIR "${CMAKE_BINARY_DIR}/native-includes")
+set(AROS_NATIVE_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/native-generated-includes")
+add_custom_target(aros-generated-includes-native)
+set_target_properties(aros-generated-includes-native PROPERTIES
+  FOLDER "aros/internal/includes"
+  AROS_GENERATED_INCLUDE_FILES ""
+)
 set(AROS_NATIVE_OUTPUT_ROOT "${CMAKE_BINARY_DIR}/bin/${AROS_TARGET}")
 set(AROS_NATIVE_SYSTEM_DIR "${AROS_NATIVE_OUTPUT_ROOT}/AROS")
 set(AROS_NATIVE_DEVELOPER_DIR "${AROS_NATIVE_SYSTEM_DIR}/Development")
@@ -361,8 +381,10 @@ add_custom_command(
           -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
           -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
           -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+          "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
           -DAROS_TARGET=${AROS_TARGET}
           -DAROS_NATIVE_INCLUDE_DIR=${AROS_NATIVE_INCLUDE_DIR}
+          -DAROS_NATIVE_GENERATED_INCLUDE_DIR=${AROS_NATIVE_GENERATED_INCLUDE_DIR}
           -DAROS_HOST_CC=${CMAKE_C_COMPILER}
           -DAROS_TARGET_CC=${_aros_native_target_cc}
           -DAROS_TARGET_TOOLCHAIN_DIR=${AROS_NATIVE_TOOLCHAIN_INSTALL_DIR}
@@ -371,6 +393,10 @@ add_custom_command(
   COMMAND "${CMAKE_COMMAND}" -E touch "${AROS_NATIVE_INCLUDES_STAMP}"
   DEPENDS
     ${_aros_native_include_deps}
+    ${AROS_NATIVE_CONFIG_FILE}
+    "${CMAKE_SOURCE_DIR}/cmake/AROSNativeConfig.cmake"
+    aros-generated-includes-native
+    "$<TARGET_PROPERTY:aros-generated-includes-native,AROS_GENERATED_INCLUDE_FILES>"
     "${CMAKE_SOURCE_DIR}/cmake/stage_native_includes.cmake"
     ${_aros_native_include_inputs}
   COMMENT "Staging native AROS developer includes for CMake-native module builds"
@@ -380,7 +406,132 @@ add_custom_target(aros-native-includes DEPENDS "${AROS_NATIVE_INCLUDES_STAMP}")
 add_custom_target(aros-sdk-interfaces-native)
 
 add_subdirectory(compiler)
-add_subdirectory(arch)
+include("${CMAKE_SOURCE_DIR}/cmake/AROSMmakeEntrypoints.cmake")
+add_custom_target(aros-arch-linklibs-native)
+# Transitional host-tool/SDK generator registration; not yet manifest-owned.
+if(AROS_BUILD_UDIS86)
+  add_subdirectory(arch/all-pc/udis86)
+endif()
+aros_layering_get_active_alias_layers(_aros_crt_aliases)
+set(_aros_crt_entrypoints linklibs-romhack)
+foreach(_alias IN LISTS _aros_crt_aliases)
+  list(APPEND _aros_crt_entrypoints "linklibs-romhack-${_alias}")
+endforeach()
+aros_find_mmake_entrypoint(_aros_romhack OPTIONAL NAMES ${_aros_crt_entrypoints} KINDS build_linklib)
+if(_aros_romhack_FOUND)
+  aros_register_mmake_linklib(aros-arch-crt-romhack-linklib-native
+    MODULE_PATH "${_aros_romhack_MODULE_PATH}" MMAKE_NAME "${_aros_romhack_mmake}"
+    MMAKEFILE_SRC "${_aros_romhack_MANIFEST}")
+  add_dependencies(aros-arch-linklibs-native aros-arch-crt-romhack-linklib-native)
+endif()
+if(DEFINED AROS_ARCH_NATIVE_MODULES AND NOT AROS_ARCH_NATIVE_MODULES STREQUAL "all-hosted/hostlib")
+  message(FATAL_ERROR "AROS_ARCH_NATIVE_MODULES directory overrides are retired; hosted modules are discovered from the boot configuration")
+endif()
+unset(AROS_ARCH_NATIVE_MODULES CACHE)
+include("${CMAKE_SOURCE_DIR}/cmake/AROSHosted.cmake")
+if(AROS_BUILD_HOSTED_BOOTSTRAP)
+  include("${CMAKE_SOURCE_DIR}/cmake/AROSHostedModules.cmake")
+  include("${CMAKE_SOURCE_DIR}/cmake/AROSProgramTargets.cmake")
+  if(DEFINED AROS_NATIVE_PROGRAM_RULES)
+    message(STATUS "Removing obsolete AROS_NATIVE_PROGRAM_RULES allowlist; programs now follow the metadata graph")
+    unset(AROS_NATIVE_PROGRAM_RULES CACHE)
+    unset(AROS_NATIVE_PROGRAM_RULES)
+  endif()
+  set(AROS_NATIVE_PROGRAM_ROOT "" CACHE STRING
+    "Optional metadata root for program discovery; empty uses mmake.config.in defaulttarget")
+  aros_add_program_graph(aros-programs-native ROOT "${AROS_NATIVE_PROGRAM_ROOT}")
+  cmake_language(DEFER CALL aros_finalize_program_dependencies)
+  add_custom_target(aros-programs-check
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/native-config"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_native_config.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/graph-metadata"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_graph_metadata.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/program-discovery"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_program_discovery.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/programs"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_programs.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/program-objdir"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_program_objdir.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/program-dependencies"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_program_dependencies.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/program-static"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_program_static.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/detached-programs"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_detached_programs.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/programs-nix"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_nix_programs.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/linklibs"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_linklibs.cmake" VERBATIM)
+  set_target_properties(aros-programs-check PROPERTIES FOLDER "aros/tests")
+  add_custom_target(aros-fetch-check
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/fetch"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_fetch.cmake" VERBATIM)
+  set_target_properties(aros-fetch-check PROPERTIES FOLDER "aros/tests")
+  add_custom_target(aros-includes-check
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/includes"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_includes.cmake" VERBATIM)
+  set_target_properties(aros-includes-check PROPERTIES FOLDER "aros/tests")
+  add_custom_target(aros-include-transforms-check
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/include-transforms"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_include_transforms.cmake" VERBATIM)
+  set_target_properties(aros-include-transforms-check PROPERTIES FOLDER "aros/tests")
+  add_dependencies(aros-includes-check aros-include-transforms-check)
+  add_dependencies(aros-programs-check aros-fetch-check aros-includes-check)
+  add_custom_target(aros-catalogs-check
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/catalogs"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_catalogs.cmake" VERBATIM)
+  set_target_properties(aros-catalogs-check PROPERTIES FOLDER "aros/tests")
+  add_custom_target(aros-program-codegen-check
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/program-codegen"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_program_codegen.cmake" VERBATIM)
+  set_target_properties(aros-program-codegen-check PROPERTIES FOLDER "aros/tests")
+  include("${CMAKE_SOURCE_DIR}/cmake/AROSStaticTargets.cmake")
+  set(_aros_static_defaults "workbench-s;workbench-devs-mountlist;workbench-directories")
+  if(DEFINED AROS_NATIVE_STATIC_RULES AND
+     (AROS_NATIVE_STATIC_RULES STREQUAL "workbench-s" OR
+      AROS_NATIVE_STATIC_RULES STREQUAL "workbench-s;workbench-devs-mountlist"))
+    set(AROS_NATIVE_STATIC_RULES "${_aros_static_defaults}" CACHE STRING
+      "Migrated static-data entrypoints; files and dependencies come from mmake manifests" FORCE)
+  endif()
+  set(AROS_NATIVE_STATIC_RULES "${_aros_static_defaults}" CACHE STRING
+    "Migrated static-data entrypoints; files and dependencies come from mmake manifests")
+  add_custom_target(aros-runtime-data-native)
+  set_target_properties(aros-runtime-data-native PROPERTIES FOLDER "aros/packaging")
+  foreach(_rule IN LISTS AROS_NATIVE_STATIC_RULES)
+    set(_target "aros-data-${_rule}-native")
+    aros_add_mmake_static_target("${_target}" MMAKE_NAME "${_rule}")
+    add_dependencies(aros-runtime-data-native "${_target}")
+  endforeach()
+  set(_aros_local_static_defaults "boot;workbench-fonts-quick")
+  if(DEFINED AROS_NATIVE_LOCAL_STATIC_RULES AND AROS_NATIVE_LOCAL_STATIC_RULES STREQUAL "boot")
+    set(AROS_NATIVE_LOCAL_STATIC_RULES "${_aros_local_static_defaults}" CACHE STRING
+      "Migrated local static rules only; not their global MetaMake aggregates" FORCE)
+  endif()
+  set(AROS_NATIVE_LOCAL_STATIC_RULES "${_aros_local_static_defaults}" CACHE STRING
+    "Migrated local static rules only; not their global MetaMake aggregates")
+  foreach(_rule IN LISTS AROS_NATIVE_LOCAL_STATIC_RULES)
+    set(_target "aros-data-local-${_rule}-native")
+    aros_add_mmake_local_static_target("${_target}" MMAKE_NAME "${_rule}")
+    add_dependencies(aros-runtime-data-native "${_target}")
+  endforeach()
+  add_custom_target(aros-static-graph-check
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/static-graph"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_static_graph.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/directory-copies"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_directory_copies.cmake"
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/static-patterns"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_static_patterns.cmake" VERBATIM)
+  set_target_properties(aros-static-graph-check PROPERTIES FOLDER "aros/tests")
+  add_custom_target(aros-static-text-check
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/static-text"
+      "-DTEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_static_text.cmake" VERBATIM)
+  set_target_properties(aros-static-text-check PROPERTIES FOLDER "aros/tests")
+  add_custom_target(aros-text-transforms-check
+    COMMAND "${CMAKE_COMMAND}" "-DTEST_BINARY_DIR=${CMAKE_BINARY_DIR}/tests/text-transforms"
+      -P "${CMAKE_SOURCE_DIR}/cmake/tests/mmake_text_transforms.cmake" VERBATIM)
+  set_target_properties(aros-text-transforms-check PROPERTIES FOLDER "aros/tests")
+endif()
 
 function(_aros_finalize_native_kernel_package_base_target)
   if(TARGET aros-rom-kernel-package-base-native AND TARGET aros-workbench-libs-gadtools-native)
@@ -464,6 +615,7 @@ add_custom_target(
           -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
           -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
           -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+          "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
           -DAROS_TARGET=${AROS_TARGET}
           -P "${CMAKE_SOURCE_DIR}/cmake/print_aros_layering.cmake"
   DEPENDS aros-configure
@@ -477,6 +629,7 @@ add_custom_target(
           -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
           -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
           -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+          "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
           -DAROS_TARGET=${AROS_TARGET}
           -DMODULE_PATH=rom/debug
           -P "${CMAKE_SOURCE_DIR}/cmake/report_layered_module.cmake"
@@ -491,6 +644,7 @@ add_custom_target(
           -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
           -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
           -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+          "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
           -DAROS_TARGET=${AROS_TARGET}
           -DMODULE_PATH=rom/utility
           -P "${CMAKE_SOURCE_DIR}/cmake/report_layered_module.cmake"

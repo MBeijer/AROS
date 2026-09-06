@@ -44,7 +44,7 @@
 #define PATH_MAX _MAX_PATH
 #endif
 
-#define D(x)
+#define D(x) do { if (VerboseBoot) { x; } } while (0)
 
 #define LOWMEMSIZE    (512 * 1024 * 1024)
 
@@ -66,6 +66,7 @@ char bootstrapdir[PATH_MAX];
 char *KernelArgs = NULL;
 char *SystemVersion = NULL;
 char buf[BUFFER_SIZE];
+int VerboseBoot = 0;
 
 #if (__WORDSIZE != 64)
 static struct mb_mmap MemoryMap[1] =
@@ -160,6 +161,29 @@ char *join_string(int argc, char **argv)
     return str;
 }
 
+static int EnableBootTrace(void)
+{
+    const char *arg;
+    char *args;
+    char *parts[] = {KernelArgs,
+        "sysdebug=Init,InitResident,InitCode,AddTask,RamLib,LoadSeg,AddDosNode"};
+
+    /* Explicit command-line or configuration flags take precedence. */
+    for (arg = KernelArgs; arg && *arg; arg++)
+    {
+        if ((arg == KernelArgs || isspace((unsigned char)arg[-1])) &&
+            !strncasecmp(arg, "sysdebug=", 9))
+            return 1;
+    }
+
+    args = KernelArgs ? join_string(2, parts) : join_string(1, &parts[1]);
+    if (!args)
+        return 0;
+    free(KernelArgs);
+    KernelArgs = args;
+    return 1;
+}
+
 int bootstrap(int argc, char ** argv)
 {
     int i = 1;
@@ -171,7 +195,7 @@ int bootstrap(int argc, char ** argv)
     void *ro_addr, *rw_addr, *__bss_track;
     unsigned long ro_size, rw_size, bss_size;
 
-    D(fprintf(stderr, "[Bootstrap] Started\n"));
+    VerboseBoot = 0;
 
     /*
      * This makes national characters to be output properly into
@@ -191,16 +215,22 @@ int bootstrap(int argc, char ** argv)
                     "usage: %s [options] [kernel arguments]\n"
                     "Available options:\n"
                     " -h                 show this page\n"
+                    " -v                 trace bootstrap and OS initialization to the debug log\n"
+                    "                    (explicit sysdebug= flags override the default trace)\n"
                     " -m <size>          allocate <size> Megabytes of memory for AROS\n"
                     "                    (default is 64MB)\n"
                     " -c <file>          read configuration from <file>\n"
                     "                    (default is %s)\n"
                     " --help             same as '-h'\n"
+                    " --verbose          same as '-v'\n"
                     " --memsize <size>   same as '-m <size>'\n"
                     " --config <file>    same as '-c'\n"
                     "\n"
                     "Please report bugs to the AROS development team. http://www.aros.org/\n", argv[0], DefaultConfig);
             return 0;
+        } else if (!strcmp(argv[i], "--verbose") || !strcmp(argv[i], "-v")) {
+            VerboseBoot = 1;
+            i++;
         } else if (!strcmp(argv[i], "--memsize") || !strcmp(argv[i], "-m")) {
             memSize = atoi(argv[++i]);
             def_memSize = 0;
@@ -211,6 +241,7 @@ int bootstrap(int argc, char ** argv)
         } else
             break;
     }
+    D(fprintf(stderr, "[Bootstrap] Started\n"));
     D(fprintf(stderr, "[Bootstrap] %u argument%s processed\n", i, i==1 ? "" : "s"));
 
     if (i < argc) {
@@ -246,7 +277,12 @@ int bootstrap(int argc, char ** argv)
 
         c = GetConfigArg(buf, "module");
         if (c) {
-            AddKernelFile(c);
+            if (!AddKernelFile(c))
+            {
+                DisplayError("Failed to queue boot module %s", c);
+                fclose(file);
+                return -1;
+            }
             continue;
         }
 
@@ -301,6 +337,12 @@ int bootstrap(int argc, char ** argv)
     }
     fclose(file);
 
+    if (VerboseBoot && !EnableBootTrace())
+    {
+        DisplayError("Failed to allocate boot trace arguments");
+        return -1;
+    }
+    D(fprintf(stderr, "[Bootstrap] Effective kernel arguments: %s\n", KernelArgs));
     D(fprintf(stderr, "[Bootstrap] Allocating %iMB of RAM for AROS\n",memSize));
 
 #if (__WORDSIZE == 64)
@@ -336,6 +378,7 @@ int bootstrap(int argc, char ** argv)
     fprintf(stderr, "%u bytes)\n", MemoryMap[0].len);
 #endif
 
+    D(fprintf(stderr, "[Bootstrap] Inspecting boot modules\n"));
     if (!GetKernelSize(FirstELF, &ro_size, &rw_size, &bss_size))
         return -1;
 
@@ -363,6 +406,7 @@ int bootstrap(int argc, char ** argv)
         return -1;
     }
 
+    D(fprintf(stderr, "[Bootstrap] Loading and relocating boot modules\n"));
     if (!LoadKernel(FirstELF, ro_addr, rw_addr, __bss_track, (uintptr_t)&SysBase, NULL, &kernel_entry, &Debug_KickList))
         return -1;
 

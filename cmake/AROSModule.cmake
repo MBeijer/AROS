@@ -1,5 +1,7 @@
 include_guard(GLOBAL)
-include("${CMAKE_SOURCE_DIR}/cmake/AROSLayering.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/AROSLayering.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/AROSMmakeFunctions.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/AROSNativeConfig.cmake")
 
 function(_aros_encode_list in_list out_var)
   if(in_list)
@@ -309,6 +311,7 @@ endfunction()
 
 function(_aros_split_make_arguments input_value out_var)
   set(_arguments)
+  set(_separator "")
   set(_current "")
   set(_depth 0)
   string(LENGTH "${input_value}" _input_len)
@@ -335,7 +338,9 @@ function(_aros_split_make_arguments input_value out_var)
       string(APPEND _current "${_char}")
     elseif(_char STREQUAL "," AND _depth EQUAL 0)
       string(STRIP "${_current}" _current)
-      list(APPEND _arguments "${_current}")
+      string(REPLACE ";" "\\;" _current "${_current}")
+      string(APPEND _arguments "${_separator}${_current}")
+      set(_separator ";")
       set(_current "")
     else()
       string(APPEND _current "${_char}")
@@ -345,7 +350,8 @@ function(_aros_split_make_arguments input_value out_var)
   endwhile()
 
   string(STRIP "${_current}" _current)
-  list(APPEND _arguments "${_current}")
+  string(REPLACE ";" "\\;" _current "${_current}")
+  string(APPEND _arguments "${_separator}${_current}")
   set(${out_var} "${_arguments}" PARENT_SCOPE)
 endfunction()
 
@@ -398,6 +404,12 @@ function(_aros_expand_make_tokens input_value out_var)
       string(STRIP "${_foreach_var}" _foreach_var)
 
       _aros_expand_make_tokens("${_foreach_list_expr}" _foreach_list_expanded)
+      if(_foreach_list_expanded MATCHES "\\$|@[^@ \t]+@")
+        # An immediate assignment must not re-evaluate this list after a
+        # later assignment happens to make its variables known.
+        set(${out_var} "${_foreach_prefix}$<unresolved-foreach-list>${_foreach_suffix}" PARENT_SCOPE)
+        return()
+      endif()
       separate_arguments(_foreach_values NATIVE_COMMAND "${_foreach_list_expanded}")
 
       set(_foreach_saved_defined FALSE)
@@ -431,7 +443,20 @@ function(_aros_expand_make_tokens input_value out_var)
       continue()
     endif()
 
-    string(REGEX MATCH "\\$\\(([A-Za-z0-9_]+)\\)" _match "${_expanded}")
+    # Bind foreach variables before evaluating functions in their bodies.
+    # Filesystem-aware consumers opt in; other metadata readers stay pure.
+    if(_AROS_MMAKE_CALL_EXPANDER)
+      cmake_language(CALL "${_AROS_MMAKE_CALL_EXPANDER}" "${_expanded}" _expanded _call_function)
+      if(_call_function)
+        continue()
+      endif()
+    endif()
+    _aros_expand_make_word_function("${_expanded}" _expanded _word_function)
+    if(_word_function)
+      continue()
+    endif()
+
+    string(REGEX MATCH "\\$\\(([A-Za-z0-9_-]+)\\)" _match "${_expanded}")
     if(NOT _match)
       break()
     endif()
@@ -482,6 +507,18 @@ function(_aros_expand_make_tokens input_value out_var)
 endfunction()
 
 function(_aros_read_config_value variable_name out_var)
+  _aros_native_config_value("${variable_name}" _value _found)
+  if(_found)
+    set(${out_var} "${_value}" PARENT_SCOPE)
+    return()
+  endif()
+  # A conditional default may test the variable it is about to define. At
+  # that point there is no earlier config assignment to resolve recursively.
+  if(variable_name IN_LIST _aros_config_read_stack)
+    set(${out_var} "" PARENT_SCOPE)
+    return()
+  endif()
+  list(APPEND _aros_config_read_stack "${variable_name}")
   set(_config_files
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/compiler.cfg"
@@ -494,15 +531,71 @@ function(_aros_read_config_value variable_name out_var)
       continue()
     endif()
 
-    file(STRINGS "${_config_file}" _value_line REGEX "^${variable_name}[ \t]*:?=")
-    if(_value_line)
-      string(REGEX REPLACE "^${variable_name}[ \t]*:?=[ \t]*" "" _value "${_value_line}")
-      _aros_unwrap_strip_expression("${_value}" _value)
+    file(STRINGS "${_config_file}" _value_lines REGEX "^[ \t]*${variable_name}[ \t]*:?=")
+    if(NOT _value_lines)
+      continue()
+    endif()
+    # The same config values are queried for hundreds of modules. Cache only
+    # syntax, not expanded values (which depend on the caller's make context).
+    file(SHA256 "${_config_file}" _config_hash)
+    get_property(_config_lines GLOBAL PROPERTY "AROS_CONFIG_LINES_${_config_hash}")
+    if(NOT _config_lines)
+      _aros_read_mmake_logical_lines("${_config_file}" _config_lines)
+      set_property(GLOBAL PROPERTY "AROS_CONFIG_LINES_${_config_hash}" "${_config_lines}")
+    endif()
+    set(_conditions)
+    foreach(_line IN LISTS _config_lines)
+      if(_line MATCHES "^ifn?eq[ \t]*\\(.*\\)$")
+        list(APPEND _conditions "${_line}")
+      elseif(_line STREQUAL "else")
+        list(POP_BACK _conditions _condition)
+        list(APPEND _conditions "!${_condition}")
+      elseif(_line STREQUAL "endif")
+        list(POP_BACK _conditions)
+      elseif(_line MATCHES "^${variable_name}[ \t]*:?=[ \t]*(.*)$")
+        set(_value "${CMAKE_MATCH_1}")
+        set(_active TRUE)
+        # Evaluate only the conditions enclosing this assignment. An unrelated
+        # earlier condition may itself query the value we are looking up.
+        foreach(_condition IN LISTS _conditions)
+          if(_condition MATCHES "^!(.*)$")
+            _aros_evaluate_mmake_condition("${CMAKE_MATCH_1}" _condition_active)
+            if(_condition_active)
+              set(_condition_active FALSE)
+            else()
+              set(_condition_active TRUE)
+            endif()
+          else()
+            _aros_evaluate_mmake_condition("${_condition}" _condition_active)
+          endif()
+          if(NOT _condition_active)
+            set(_active FALSE)
+            break()
+          endif()
+        endforeach()
+        if(_active)
+          _aros_unwrap_strip_expression("${_value}" _value)
+          set(${out_var} "${_value}" PARENT_SCOPE)
+          return()
+        endif()
+      endif()
+    endforeach()
+  endforeach()
+
+  # START LEGACY: configure still exports a few configuration values only in
+  # its top-level Makefile (icon set, GUI theme, bootloader). Read assignments,
+  # never recipes, until the native configuration snapshot owns those values.
+  if(EXISTS "${AROS_LEGACY_BUILD_DIR}/Makefile")
+    file(STRINGS "${AROS_LEGACY_BUILD_DIR}/Makefile" _exports
+      REGEX "^export[ \t]+${variable_name}[ \t]*:?=")
+    if(_exports)
+      list(GET _exports -1 _export)
+      string(REGEX REPLACE "^export[ \t]+${variable_name}[ \t]*:?=[ \t]*" "" _value "${_export}")
       set(${out_var} "${_value}" PARENT_SCOPE)
       return()
     endif()
-  endforeach()
-
+  endif()
+  # END LEGACY
   set(${out_var} "" PARENT_SCOPE)
 endfunction()
 
@@ -569,29 +662,8 @@ function(_aros_condition_stack_is_active condition_stack out_var)
 endfunction()
 
 function(_aros_evaluate_mmake_condition line out_var)
-  if(line MATCHES "^ifneq[ \t]*\\((.*),(.*)\\)$")
-    set(_left "${CMAKE_MATCH_1}")
-    set(_right "${CMAKE_MATCH_2}")
-    _aros_expand_make_tokens("${_left}" _left_expanded)
-    _aros_expand_make_tokens("${_right}" _right_expanded)
-    if(NOT _left_expanded STREQUAL _right_expanded)
-      set(${out_var} TRUE PARENT_SCOPE)
-    else()
-      set(${out_var} FALSE PARENT_SCOPE)
-    endif()
-  elseif(line MATCHES "^ifeq[ \t]*\\((.*),(.*)\\)$")
-    set(_left "${CMAKE_MATCH_1}")
-    set(_right "${CMAKE_MATCH_2}")
-    _aros_expand_make_tokens("${_left}" _left_expanded)
-    _aros_expand_make_tokens("${_right}" _right_expanded)
-    if(_left_expanded STREQUAL _right_expanded)
-      set(${out_var} TRUE PARENT_SCOPE)
-    else()
-      set(${out_var} FALSE PARENT_SCOPE)
-    endif()
-  else()
-    message(FATAL_ERROR "Unsupported mmake conditional while parsing CMake metadata: ${line}")
-  endif()
+  _aros_evaluate_make_equality("${line}" _active)
+  set(${out_var} "${_active}" PARENT_SCOPE)
 endfunction()
 
 function(_aros_tokenize_mmake_value input_value out_var)
@@ -1083,19 +1155,31 @@ function(_aros_collect_interface_dependency_artifacts out_files_var out_targets_
 endfunction()
 
 function(_aros_read_mmake_logical_lines file_path out_var)
-  file(STRINGS "${file_path}" _raw_lines)
+  # Keep physical newlines while splitting: file(STRINGS) folds backslash
+  # continuations into semicolons, losing both #MM edges and shell separators.
+  file(READ "${file_path}" _contents)
+  string(REPLACE ";" "\\;" _contents "${_contents}")
+  string(APPEND _contents "\n")
+  string(REGEX MATCHALL "[^\n]*\n" _raw_lines "${_contents}")
   set(_logical_lines)
   set(_current "")
 
   foreach(_raw_line IN LISTS _raw_lines)
     string(REGEX REPLACE "[\r\n]+$" "" _line "${_raw_line}")
     string(STRIP "${_line}" _stripped_line)
+    if(_current MATCHES "^#MM" AND _stripped_line MATCHES "^#MM[ \t]+")
+      string(REGEX REPLACE "^#MM[ \t]+" "" _line "${_stripped_line}")
+      set(_stripped_line "${_line}")
+    endif()
     if(NOT "${_current}" STREQUAL "" AND "${_stripped_line}" MATCHES "^#")
       string(STRIP "${_current}" _current)
       string(REGEX REPLACE "([ \t]|;)+#.*$" "" _current "${_current}")
       string(STRIP "${_current}" _current)
       if(NOT "${_current}" STREQUAL "")
         string(REPLACE ";" "\\;" _current "${_current}")
+        if(ARGV2 STREQUAL "PRESERVE_RECIPES" AND _recipe)
+          string(PREPEND _current "\t")
+        endif()
         list(APPEND _logical_lines "${_current}")
       endif()
       set(_current "")
@@ -1103,6 +1187,10 @@ function(_aros_read_mmake_logical_lines file_path out_var)
     endif()
     if("${_current}" STREQUAL "")
       set(_current "${_line}")
+      set(_recipe FALSE)
+      if(_line MATCHES "^\t")
+        set(_recipe TRUE)
+      endif()
     else()
       string(APPEND _current " " "${_line}")
     endif()
@@ -1116,6 +1204,9 @@ function(_aros_read_mmake_logical_lines file_path out_var)
       string(STRIP "${_current}" _current)
       if(NOT "${_current}" STREQUAL "")
         string(REPLACE ";" "\\;" _current "${_current}")
+        if(ARGV2 STREQUAL "PRESERVE_RECIPES" AND _recipe)
+          string(PREPEND _current "\t")
+        endif()
         list(APPEND _logical_lines "${_current}")
       endif()
       set(_current "")
@@ -1127,6 +1218,9 @@ function(_aros_read_mmake_logical_lines file_path out_var)
     string(REGEX REPLACE "([ \t]|;)+#.*$" "" _current "${_current}")
     string(STRIP "${_current}" _current)
     string(REPLACE ";" "\\;" _current "${_current}")
+    if(ARGV2 STREQUAL "PRESERVE_RECIPES" AND _recipe)
+      string(PREPEND _current "\t")
+    endif()
     list(APPEND _logical_lines "${_current}")
   endif()
 
@@ -1135,6 +1229,7 @@ endfunction()
 
 function(_aros_collect_include_interface_modules_from_files out_var)
   set(_source_scan_extensions
+    ${_AROS_INCLUDE_SCAN_EXTRA_EXTENSIONS}
     .c
     .cc
     .cpp
@@ -1181,6 +1276,7 @@ endfunction()
 
 function(_aros_collect_include_virtual_paths_from_files out_var)
   set(_source_scan_extensions
+    ${_AROS_INCLUDE_SCAN_EXTRA_EXTENSIONS}
     .c
     .cc
     .cpp
@@ -1386,6 +1482,7 @@ function(_aros_extract_mmake_build_module_metadata mmakefile_src module_path out
   set(_module_mmake "")
   set(_module_conf "")
   set(_module_suffix "")
+  set(_module_runtime_dir "")
   set(_module_archspecific FALSE)
   set(_module_sdk "public")
   set(_module_link_libs)
@@ -1404,6 +1501,7 @@ function(_aros_extract_mmake_build_module_metadata mmakefile_src module_path out
       set(_line_module_mmake "")
       set(_line_module_conf "")
       set(_line_module_suffix "")
+      set(_line_module_runtime_dir "")
       set(_line_module_archspecific FALSE)
       set(_line_module_sdk "public")
       set(_line_module_link_libs)
@@ -1426,6 +1524,8 @@ function(_aros_extract_mmake_build_module_metadata mmakefile_src module_path out
           set(_line_module_conf "${_value}")
         elseif(_key STREQUAL "modsuffix")
           set(_line_module_suffix "${_value}")
+        elseif(_key STREQUAL "moduledir")
+          set(_line_module_runtime_dir "${_value}")
         elseif(_key STREQUAL "archspecific" AND _value STREQUAL "yes")
           set(_line_module_archspecific TRUE)
         elseif(_key STREQUAL "sdk")
@@ -1449,6 +1549,7 @@ function(_aros_extract_mmake_build_module_metadata mmakefile_src module_path out
       set(_module_mmake "${_line_module_mmake}")
       set(_module_conf "${_line_module_conf}")
       set(_module_suffix "${_line_module_suffix}")
+      set(_module_runtime_dir "${_line_module_runtime_dir}")
       set(_module_archspecific "${_line_module_archspecific}")
       set(_module_sdk "${_line_module_sdk}")
       set(_module_link_libs ${_line_module_link_libs})
@@ -1476,6 +1577,7 @@ function(_aros_extract_mmake_build_module_metadata mmakefile_src module_path out
   set(${out_prefix}_MMAKE_NAME "${_module_mmake}" PARENT_SCOPE)
   set(${out_prefix}_MODULE_CONF "${_module_conf_path}" PARENT_SCOPE)
   set(${out_prefix}_MODULE_SUFFIX "${_module_suffix}" PARENT_SCOPE)
+  set(${out_prefix}_MODULE_RUNTIME_DIR "${_module_runtime_dir}" PARENT_SCOPE)
   set(${out_prefix}_ARCHSPECIFIC "${_module_archspecific}" PARENT_SCOPE)
   set(${out_prefix}_MODULE_SDK "${_module_sdk}" PARENT_SCOPE)
   set(${out_prefix}_MODULE_LINK_LIBS "${_module_link_libs}" PARENT_SCOPE)
@@ -1562,6 +1664,10 @@ function(_aros_extract_mmake_include_interface_metadata mmakefile_src module_nam
   set(_interface_names)
   set(_interface_depends)
   set(_preferred_name "kernel-${module_name}-includes")
+  if(ARGC GREATER 4 AND NOT "${ARGV4}" STREQUAL "")
+    # build_module creates this interface even without an explicit #MM line.
+    set(_preferred_name "${ARGV4}-includes")
+  endif()
 
   foreach(_line IN LISTS _logical_lines)
     if(NOT _line MATCHES "^#MM-?[ \t]+([^ \t:]+)[ \t]*:(.*)$")
@@ -1937,6 +2043,7 @@ function(aros_register_layered_module_sources_target target_name module_path)
             -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
             -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+            "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
             -DAROS_TARGET=${AROS_TARGET}
             -DMODULE_PATH=${module_path}
             -P "${CMAKE_SOURCE_DIR}/cmake/report_layered_module.cmake"
@@ -1986,6 +2093,7 @@ function(aros_add_emit_tool_stdout_file target_name)
   set(_one_value_args
     OUTPUT
     PROGRAM
+    WORKING_DIRECTORY
   )
   set(_multi_value_args
     COMMAND_ARGS
@@ -2006,9 +2114,10 @@ function(aros_add_emit_tool_stdout_file target_name)
             -DPROGRAM=${AROS_EMIT_PROGRAM}
             -DCOMMAND_ARGS=${_aros_emit_command_args}
             -DOUTPUT_FILE=${AROS_EMIT_OUTPUT}
-            -P "${CMAKE_SOURCE_DIR}/cmake/emit_tool_stdout_to_file.cmake"
+            -DWORKING_DIRECTORY=${AROS_EMIT_WORKING_DIRECTORY}
+            -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/emit_tool_stdout_to_file.cmake"
     DEPENDS
-      "${CMAKE_SOURCE_DIR}/cmake/emit_tool_stdout_to_file.cmake"
+      "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/emit_tool_stdout_to_file.cmake"
       ${AROS_EMIT_DEPENDS}
     VERBATIM
   )
@@ -2091,6 +2200,7 @@ function(aros_register_genmodule_module target_name)
   )
   set(_one_value_args
     MODULE_PATH
+    MODULE_RUNTIME_DIR
     MODULE_MMAKE_NAME
     MODULE_NAME
     MODULE_TYPE
@@ -2177,7 +2287,9 @@ function(aros_register_genmodule_module target_name)
     set(AROS_MODULE_OUTPUT_SUFFIX "${_aros_default_output_suffix}")
   endif()
   if(NOT AROS_MODULE_MODULE_FILENAME_SEPARATOR)
-    if(DEFINED _aros_default_separator)
+    if(AROS_MODULE_MODULE_SUFFIX STREQUAL "handler")
+      set(AROS_MODULE_MODULE_FILENAME_SEPARATOR "-")
+    elseif(DEFINED _aros_default_separator)
       set(AROS_MODULE_MODULE_FILENAME_SEPARATOR "${_aros_default_separator}")
     else()
       set(AROS_MODULE_MODULE_FILENAME_SEPARATOR ".")
@@ -2195,6 +2307,8 @@ function(aros_register_genmodule_module target_name)
   set(_aros_module_work_dir "${CMAKE_BINARY_DIR}/modules/${_aros_module_id}")
   set(_aros_module_generated_dir "${_aros_module_work_dir}/genmodule")
   set(_aros_module_obj_dir "${_aros_module_work_dir}/obj")
+  set(_aros_module_link_manifest "${_aros_module_work_dir}/${AROS_MODULE_MODULE_NAME}.${AROS_MODULE_MODULE_TYPE}-link.cmake")
+  set(_aros_module_kobj "${CMAKE_BINARY_DIR}/bin/${AROS_TARGET}/gen/kobjs/${AROS_MODULE_MODULE_NAME}_${AROS_MODULE_MODULE_SUFFIX}.o")
   set(_aros_module_interface_stamp "${_aros_module_work_dir}/.${AROS_MODULE_MODULE_NAME}.${AROS_MODULE_MODULE_TYPE}-interfaces.stamp")
   set(_aros_module_interface_target "${target_name}-interface")
   set(_aros_module_native_abi_target "${target_name}-abi")
@@ -2206,6 +2320,12 @@ function(aros_register_genmodule_module target_name)
     set(_aros_module_runtime_prefix "boot/${_aros_target_arch}/")
   endif()
   set(_aros_module_output_dir "${CMAKE_BINARY_DIR}/bin/${AROS_TARGET}/AROS/${_aros_module_runtime_prefix}${AROS_MODULE_OUTPUT_SUBDIR}")
+  if(AROS_MODULE_MODULE_RUNTIME_DIR)
+    if(IS_ABSOLUTE "${AROS_MODULE_MODULE_RUNTIME_DIR}" OR AROS_MODULE_MODULE_RUNTIME_DIR MATCHES "(^|/)\\.\\.(/|$)")
+      message(FATAL_ERROR "Module runtime directory must be relative to the AROS tree: ${AROS_MODULE_MODULE_RUNTIME_DIR}")
+    endif()
+    set(_aros_module_output_dir "${CMAKE_BINARY_DIR}/bin/${AROS_TARGET}/AROS/${AROS_MODULE_MODULE_RUNTIME_DIR}")
+  endif()
   set(_aros_module_output
     "${_aros_module_output_dir}/${AROS_MODULE_MODULE_NAME}${AROS_MODULE_MODULE_FILENAME_SEPARATOR}${AROS_MODULE_MODULE_SUFFIX}"
   )
@@ -2338,6 +2458,8 @@ function(aros_register_genmodule_module target_name)
   endforeach()
   set(_aros_module_sysroot "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/AROS/Development")
   set(_aros_module_config_deps
+    ${AROS_NATIVE_CONFIG_FILE}
+    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/AROSNativeConfig.cmake"
     "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
@@ -2348,6 +2470,8 @@ function(aros_register_genmodule_module target_name)
     aros-configure
     genmodule
     "${CMAKE_SOURCE_DIR}/cmake/build_genmodule_module.cmake"
+    "${CMAKE_SOURCE_DIR}/cmake/AROSMmakeBuild.cmake"
+    "${CMAKE_SOURCE_DIR}/cmake/AROSMmakeFunctions.cmake"
     "${AROS_MODULE_MODULE_CONF}"
     ${AROS_MODULE_DEPENDS}
   )
@@ -2436,6 +2560,7 @@ function(aros_register_genmodule_module target_name)
             -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
             -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+            "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
             -DAROS_TARGET=${AROS_TARGET}
             -DAROS_GENMODULE=$<TARGET_FILE:genmodule>
             -DAROS_TOOLCHAIN_DIR=${_aros_module_toolchain_dir}
@@ -2505,7 +2630,11 @@ function(aros_register_genmodule_module target_name)
   add_dependencies("${_aros_module_interface_target}" "${target_name}-interfaces")
 
   if(NOT AROS_MODULE_INTERFACE_NAMES)
-    set(AROS_MODULE_INTERFACE_NAMES "kernel-${AROS_MODULE_MODULE_NAME}-includes")
+    if(AROS_MODULE_MODULE_MMAKE_NAME)
+      set(AROS_MODULE_INTERFACE_NAMES "${AROS_MODULE_MODULE_MMAKE_NAME}-includes")
+    else()
+      set(AROS_MODULE_INTERFACE_NAMES "kernel-${AROS_MODULE_MODULE_NAME}-includes")
+    endif()
   endif()
   set_target_properties(
     "${_aros_module_interface_target}"
@@ -2545,11 +2674,12 @@ function(aros_register_genmodule_module target_name)
   )
 
   add_custom_command(
-    OUTPUT "${_aros_module_output}"
+    OUTPUT "${_aros_module_link_manifest}"
     COMMAND "${CMAKE_COMMAND}"
             -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
             -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+            "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
             -DAROS_TARGET=${AROS_TARGET}
             -DAROS_GENMODULE=$<TARGET_FILE:genmodule>
             -DAROS_TOOLCHAIN_DIR=${_aros_module_toolchain_dir}
@@ -2583,16 +2713,42 @@ function(aros_register_genmodule_module target_name)
             -DMODULE_LINK_LIBS=${_aros_module_link_libs}
             -DMODULE_AUTO_LINK_LIBS=${_aros_module_auto_link_libs}
             -DMODULE_EXPECTED_ARCHIVE_DEPS=${_aros_module_archive_dep_files_encoded}
+            -DMODULE_LINK_MANIFEST=${_aros_module_link_manifest}
             -P "${CMAKE_SOURCE_DIR}/cmake/build_genmodule_module.cmake"
     DEPENDS
       ${_aros_module_runtime_build_target_deps}
       ${_aros_module_runtime_build_file_deps}
       "$<TARGET_PROPERTY:${_aros_module_interface_target},AROS_MODULE_ARCHIVE_DEP_FILES>"
       "$<TARGET_PROPERTY:${_aros_module_interface_target},AROS_MODULE_INTERFACE_DEPENDENCY_STAMPS>"
-    COMMENT "Building native CMake ${AROS_MODULE_MODULE_PATH} module"
+    COMMENT "Compiling native CMake ${AROS_MODULE_MODULE_PATH} module"
     VERBATIM
   )
 
+  add_custom_command(
+    OUTPUT "${_aros_module_output}"
+    COMMAND "${CMAKE_COMMAND}" "-DMODULE_LINK_MANIFEST=${_aros_module_link_manifest}"
+      -P "${CMAKE_SOURCE_DIR}/cmake/link_genmodule_module.cmake"
+    DEPENDS "${_aros_module_link_manifest}" "${CMAKE_SOURCE_DIR}/cmake/link_genmodule_module.cmake"
+    COMMENT "Linking native CMake ${AROS_MODULE_MODULE_PATH} module"
+    VERBATIM
+  )
+  add_custom_command(
+    OUTPUT "${_aros_module_kobj}"
+    COMMAND "${CMAKE_COMMAND}" "-DMODULE_LINK_MANIFEST=${_aros_module_link_manifest}"
+      "-DKICKSTART_OUTPUT=${_aros_module_kobj}"
+      -P "${CMAKE_SOURCE_DIR}/cmake/link_genmodule_module.cmake"
+    DEPENDS "${_aros_module_link_manifest}" "${CMAKE_SOURCE_DIR}/cmake/link_genmodule_module.cmake"
+      "$<TARGET_PROPERTY:${target_name}-kobj,AROS_KOBJ_DEP_FILES>"
+    COMMENT "Linking native CMake ${AROS_MODULE_MODULE_PATH} kickstart object"
+    VERBATIM
+  )
+  add_custom_target("${target_name}-kobj" DEPENDS "${_aros_module_kobj}")
+  set_target_properties("${target_name}-kobj" PROPERTIES FOLDER "${_aros_module_internal_folder}"
+    AROS_KOBJ_DEP_FILES ""
+    AROS_KOBJ_ARCHIVE_NAMES "${_aros_module_resolved_link_libs};dos;intuition;layers;graphics;oop;utility;expansion;keymap")
+  set_property(GLOBAL PROPERTY "AROS_KICKSTART_OBJECT_${AROS_MODULE_MODULE_NAME}_${AROS_MODULE_MODULE_SUFFIX}"
+    "${target_name}-kobj|${_aros_module_kobj}")
+  set_property(GLOBAL APPEND PROPERTY AROS_REGISTERED_KOBJ_TARGETS "${target_name}-kobj")
   add_custom_target("${target_name}" DEPENDS "${_aros_module_output}")
   add_custom_target("${_aros_module_native_abi_target}" DEPENDS "${_aros_module_output}")
   _aros_set_target_folder_if_exists("${target_name}-interfaces" "${_aros_module_internal_folder}")
@@ -2600,6 +2756,9 @@ function(aros_register_genmodule_module target_name)
   _aros_set_target_folder_if_exists("${target_name}" "${_aros_module_internal_folder}")
   _aros_set_target_folder_if_exists("${_aros_module_native_abi_target}" "${_aros_module_internal_folder}")
   if(NOT target_name MATCHES "-sdk-native$")
+    if(AROS_MODULE_MODULE_MMAKE_NAME)
+      _aros_register_mmake_runtime_target("${AROS_MODULE_MODULE_MMAKE_NAME}" "${target_name}")
+    endif()
     set_target_properties(
       "${target_name}"
       PROPERTIES
@@ -2676,6 +2835,18 @@ function(aros_register_genmodule_module target_name)
   endif()
 endfunction()
 
+function(_aros_register_mmake_runtime_target mmake target_name)
+  if(NOT mmake OR NOT TARGET "${target_name}")
+    message(FATAL_ERROR "Native mmake registration requires a name and an existing target")
+  endif()
+  string(SHA256 _key "${mmake}")
+  get_property(_owner GLOBAL PROPERTY "AROS_MMAKE_RUNTIME_TARGET_${_key}")
+  if(_owner AND NOT _owner STREQUAL target_name)
+    message(FATAL_ERROR "Conflicting native mmake producers for ${mmake}: ${_owner}, ${target_name}")
+  endif()
+  set_property(GLOBAL PROPERTY "AROS_MMAKE_RUNTIME_TARGET_${_key}" "${target_name}")
+endfunction()
+
 function(aros_register_mmake_genmodule_module target_name)
   set(_options)
   set(_one_value_args
@@ -2733,6 +2904,7 @@ function(aros_register_mmake_genmodule_module target_name)
     "${_aros_mmake_MODULE_NAME}"
     _aros_mmake_INTERFACE_NAMES
     _aros_mmake_INTERFACE_DEPENDS
+    "${_aros_mmake_MMAKE_NAME}"
   )
   get_filename_component(_aros_module_dir_name "${AROS_MMAKE_MODULE_PATH}" NAME)
   _aros_collect_active_module_layer_mmakefiles(
@@ -2799,6 +2971,7 @@ function(aros_register_mmake_genmodule_module target_name)
     MODULE_SDK "${_aros_mmake_MODULE_SDK}"
     MMAKEFILE_SRC "${_aros_mmakefile_src}"
     MODULE_SUFFIX "${_aros_mmake_MODULE_SUFFIX}"
+    MODULE_RUNTIME_DIR "${_aros_mmake_MODULE_RUNTIME_DIR}"
     SOURCE_INCLUDE_PATHS ${_aros_module_source_include_paths}
     STAGED_INCLUDE_PATHS ${_aros_module_staged_include_paths}
     INCLUDE_DIRS ${_aros_module_extra_include_dirs}
@@ -2820,7 +2993,7 @@ function(aros_register_mmake_genmodule_module target_name)
 endfunction()
 
 function(aros_register_mmake_linklib target_name)
-  set(_options)
+  set(_options LEGACY_GENERATED_HEADERS)
   set(_one_value_args
     MODULE_PATH
     MMAKEFILE_SRC
@@ -2881,6 +3054,8 @@ function(aros_register_mmake_linklib target_name)
   endif()
   set(_aros_linklib_sysroot "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/AROS/Development")
   set(_aros_linklib_config_deps
+    ${AROS_NATIVE_CONFIG_FILE}
+    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/AROSNativeConfig.cmake"
     "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
@@ -2898,7 +3073,6 @@ function(aros_register_mmake_linklib target_name)
 
   set(_aros_linklib_include_deps
     aros-native-includes
-    "${CMAKE_SOURCE_DIR}/cmake/stage_mmake_includes.cmake"
     "${_aros_mmakefile_src}"
     ${_aros_linklib_config_deps}
     ${AROS_LINKLIB_DEPENDS}
@@ -2907,22 +3081,38 @@ function(aros_register_mmake_linklib target_name)
     list(APPEND _aros_linklib_include_deps "${AROS_NATIVE_INCLUDES_STAMP}")
   endif()
 
+  if(AROS_LINKLIB_LEGACY_GENERATED_HEADERS)
+    if(NOT AROS_LINKLIB_DEPENDS)
+      message(FATAL_ERROR "LEGACY_GENERATED_HEADERS requires an explicit code-generation dependency")
+    endif()
+    # Preserve existing generator adapters until their recipes have native
+    # manifest translators. Never infer this escape hatch from existing files.
+    set(_aros_header_commands
+      COMMAND "${CMAKE_COMMAND}"
+        -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
+        -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+        "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
+        -DAROS_TARGET=${AROS_TARGET}
+        -DAROS_NATIVE_INCLUDE_DIR=${AROS_NATIVE_INCLUDE_DIR}
+        -DAROS_NATIVE_BUILD_SDKS_DIR=${AROS_NATIVE_BUILD_SDKS_DIR}
+        -DMMAKEFILE_PATH=${_aros_mmakefile_src}
+        -DINCLUDES_SDK=${_aros_linklib_SDK}
+        -DINCLUDES_STAMP=${_aros_linklib_include_stamp}
+        -P "${CMAKE_SOURCE_DIR}/cmake/stage_mmake_includes.cmake")
+    list(APPEND _aros_linklib_include_deps "${CMAKE_SOURCE_DIR}/cmake/stage_mmake_includes.cmake")
+  else()
+    set(_aros_header_commands
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${_aros_linklib_obj_dir}"
+      COMMAND "${CMAKE_COMMAND}" -E touch "${_aros_linklib_include_stamp}")
+  endif()
   add_custom_command(
     OUTPUT "${_aros_linklib_include_stamp}"
-    COMMAND "${CMAKE_COMMAND}"
-            -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-            -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
-            -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
-            -DAROS_TARGET=${AROS_TARGET}
-            -DAROS_NATIVE_INCLUDE_DIR=${AROS_NATIVE_INCLUDE_DIR}
-            -DAROS_NATIVE_BUILD_SDKS_DIR=${AROS_NATIVE_BUILD_SDKS_DIR}
-            -DMMAKEFILE_PATH=${_aros_mmakefile_src}
-            -DINCLUDES_SDK=${_aros_linklib_SDK}
-            -DINCLUDES_STAMP=${_aros_linklib_include_stamp}
-            -P "${CMAKE_SOURCE_DIR}/cmake/stage_mmake_includes.cmake"
+    ${_aros_header_commands}
     DEPENDS
       ${_aros_linklib_include_deps}
-    COMMENT "Staging native CMake ${_aros_linklib_LIBNAME} includes"
+      "$<TARGET_PROPERTY:${target_name},AROS_LINKLIB_HEADER_OUTPUTS>"
+    COMMENT "Completing manifest headers for ${_aros_linklib_LIBNAME}"
     VERBATIM
   )
 
@@ -2932,6 +3122,7 @@ function(aros_register_mmake_linklib target_name)
             -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
             -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+            "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
             -DAROS_TARGET=${AROS_TARGET}
             -DAROS_TOOLCHAIN_DIR=${_aros_linklib_toolchain_dir}
             -DAROS_TOOLCHAIN_PREFIX=${AROS_CROSSTOOLS_TARGET_CPU}-aros
@@ -2947,22 +3138,40 @@ function(aros_register_mmake_linklib target_name)
             -DLINKLIB_NAME=${_aros_linklib_LIBNAME}
             -DLINKLIB_OUTPUT=${_aros_linklib_output}
             -DLINKLIB_OBJ_DIR=${_aros_linklib_obj_dir}
+            -DLINKLIB_DEPFILE=${_aros_linklib_obj_dir}/${_aros_linklib_LIBNAME}.d
+            "-DLINKLIB_FETCH_CONTEXT=$<TARGET_PROPERTY:${target_name},AROS_LINKLIB_FETCH_CONTEXT>"
             -P "${CMAKE_SOURCE_DIR}/cmake/build_mmake_linklib.cmake"
     DEPENDS
       "${_aros_linklib_include_stamp}"
+      "$<TARGET_PROPERTY:${target_name},AROS_LINKLIB_FETCH_CONTEXT>"
+      "$<TARGET_PROPERTY:${target_name},AROS_LINKLIB_FETCH_REPORTS>"
       aros-configure
       aros-native-includes
       "${CMAKE_SOURCE_DIR}/cmake/build_mmake_linklib.cmake"
+      "${CMAKE_SOURCE_DIR}/cmake/AROSMmakeFunctions.cmake"
       "${_aros_mmakefile_src}"
       ${_aros_linklib_config_deps}
       ${_aros_linklib_source_deps}
       ${AROS_LINKLIB_DEPENDS}
     COMMENT "Building native CMake ${_aros_linklib_LIBNAME} linklib"
+    DEPFILE "${_aros_linklib_obj_dir}/${_aros_linklib_LIBNAME}.d"
     VERBATIM
   )
 
   add_custom_target("${target_name}-includes" DEPENDS "${_aros_linklib_include_stamp}")
   add_custom_target("${target_name}" DEPENDS "${_aros_linklib_output}")
+  set_property(TARGET "${target_name}" PROPERTY AROS_LINKLIB_OUTPUT "${_aros_linklib_output}")
+  set_target_properties("${target_name}" PROPERTIES
+    AROS_LINKLIB_HEADER_OUTPUTS "" AROS_LINKLIB_FETCH_CONTEXT "" AROS_LINKLIB_FETCH_REPORTS ""
+    AROS_LINKLIB_MMAKE_NAME "${_aros_linklib_MMAKE_NAME}")
+  if(NOT AROS_LINKLIB_LEGACY_GENERATED_HEADERS)
+    set_property(TARGET "${target_name}" PROPERTY AROS_LINKLIB_HEADER_MANIFEST "${_aros_mmakefile_src}")
+  endif()
+  get_property(_headers_scheduled GLOBAL PROPERTY AROS_LINKLIB_HEADERS_SCHEDULED)
+  if(NOT _headers_scheduled)
+    set_property(GLOBAL PROPERTY AROS_LINKLIB_HEADERS_SCHEDULED TRUE)
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _aros_finalize_linklib_headers)
+  endif()
   _aros_set_target_folder_if_exists("${target_name}-includes" "${_aros_linklib_internal_folder}")
   _aros_set_target_folder_if_exists("${target_name}" "${_aros_linklib_internal_folder}")
   if(_aros_linklib_source_interface_modules)
@@ -2997,6 +3206,12 @@ function(aros_register_mmake_linklib target_name)
     "${_aros_linklib_output}"
   )
   set(${target_name}_OUTPUT "${_aros_linklib_output}" PARENT_SCOPE)
+endfunction()
+
+function(_aros_finalize_linklib_headers)
+  # All module interface identities must exist before resolving header edges.
+  include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/AROSProgramTargets.cmake")
+  aros_finalize_mmake_linklib_headers()
 endfunction()
 
 function(aros_register_archive_linklib target_name)
@@ -3036,6 +3251,8 @@ function(aros_register_archive_linklib target_name)
   endif()
 
   set(_aros_archive_config_deps
+    ${AROS_NATIVE_CONFIG_FILE}
+    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/AROSNativeConfig.cmake"
     "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
@@ -3048,6 +3265,7 @@ function(aros_register_archive_linklib target_name)
     OUTPUT "${_aros_archive_output}"
     COMMAND "${CMAKE_COMMAND}"
             -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+            "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
             -DAROS_TARGET=${AROS_TARGET}
             -DAROS_TOOLCHAIN_DIR=${_aros_archive_toolchain_dir}
             -DAROS_TOOLCHAIN_PREFIX=${AROS_CROSSTOOLS_TARGET_CPU}-aros
@@ -3064,6 +3282,7 @@ function(aros_register_archive_linklib target_name)
   )
 
   add_custom_target("${target_name}" DEPENDS "${_aros_archive_output}")
+  set_property(TARGET "${target_name}" PROPERTY AROS_LINKLIB_OUTPUT "${_aros_archive_output}")
   _aros_set_target_folder_if_exists("${target_name}" "${_aros_archive_internal_folder}")
   if(AROS_ARCHIVE_SOURCE_INTERFACE_MODULES)
     set_target_properties(
@@ -3185,6 +3404,8 @@ function(aros_register_mmake_hidd_stub_producer target_name)
   get_filename_component(_aros_hiddstub_source_dir "${_aros_hiddstub_mmakefile}" DIRECTORY)
   _aros_compute_target_folders("${AROS_HIDDSTUB_MODULE_PATH}" _aros_hiddstub_public_folder _aros_hiddstub_internal_folder)
   set(_aros_hiddstub_config_deps
+    ${AROS_NATIVE_CONFIG_FILE}
+    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/AROSNativeConfig.cmake"
     "${AROS_LEGACY_BUILD_DIR}/config/make.cfg"
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
     "${AROS_LEGACY_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/build.cfg"
@@ -3197,6 +3418,7 @@ function(aros_register_mmake_hidd_stub_producer target_name)
             -DAROS_SOURCE_DIR=${CMAKE_SOURCE_DIR}
             -DAROS_BINARY_DIR=${CMAKE_BINARY_DIR}
             -DAROS_CONFIG_BUILD_DIR=${AROS_LEGACY_BUILD_DIR}
+            "-DAROS_NATIVE_CONFIG_FILE=${AROS_NATIVE_CONFIG_FILE}"
             -DAROS_TARGET=${AROS_TARGET}
             -DAROS_NATIVE_INCLUDE_DIR=${AROS_NATIVE_INCLUDE_DIR}
             -DAROS_NATIVE_BUILD_SDKS_DIR=${AROS_NATIVE_BUILD_SDKS_DIR}
@@ -3480,6 +3702,26 @@ function(aros_finalize_module_interfaces)
 
   endforeach()
 
+  get_property(_kobjs GLOBAL PROPERTY AROS_REGISTERED_KOBJ_TARGETS)
+  foreach(_kobj IN LISTS _kobjs)
+    get_target_property(_kobj_libs "${_kobj}" AROS_KOBJ_ARCHIVE_NAMES)
+    _aros_collect_registered_archive_dependencies(_kobj_files _kobj_targets ${_kobj_libs})
+    foreach(_dep IN LISTS _kobj_targets)
+      get_target_property(_stamp "${_dep}" AROS_MODULE_INTERFACE_STAMP)
+      if(_stamp AND NOT _stamp MATCHES "-NOTFOUND$")
+        list(APPEND _kobj_files "${_stamp}")
+      endif()
+    endforeach()
+    set_property(TARGET "${_kobj}" PROPERTY AROS_KOBJ_DEP_FILES "${_kobj_files}")
+    if(_kobj_targets)
+      add_dependencies("${_kobj}" ${_kobj_targets})
+    endif()
+  endforeach()
+
+  _aros_finalize_registered_linklib_interfaces()
+endfunction()
+
+function(_aros_finalize_registered_linklib_interfaces)
   get_property(_aros_registered_linklib_targets GLOBAL PROPERTY AROS_REGISTERED_LINKLIB_TARGETS)
   foreach(_aros_linklib_target IN LISTS _aros_registered_linklib_targets)
     if(NOT TARGET "${_aros_linklib_target}")

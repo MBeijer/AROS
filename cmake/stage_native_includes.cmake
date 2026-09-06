@@ -187,31 +187,6 @@ function(_aros_copy_matching_files src_dir dst_dir)
   endforeach()
 endfunction()
 
-function(_aros_publish_root_include_aliases source_relative_dir)
-  set(_source_dir "${AROS_NATIVE_INCLUDE_DIR}/${source_relative_dir}")
-  if(NOT IS_DIRECTORY "${_source_dir}")
-    return()
-  endif()
-
-  file(GLOB _header_files
-    RELATIVE "${_source_dir}"
-    "${_source_dir}/*.h"
-    "${_source_dir}/*.hpp"
-  )
-  foreach(_header IN LISTS _header_files)
-    get_filename_component(_header_name "${_header}" NAME)
-    set(_dest_path "${AROS_NATIVE_INCLUDE_DIR}/${_header_name}")
-    file(RELATIVE_PATH _source_link_target
-      "${AROS_NATIVE_INCLUDE_DIR}"
-      "${_source_dir}/${_header}"
-    )
-    if(EXISTS "${_dest_path}" OR IS_SYMLINK "${_dest_path}")
-      continue()
-    endif()
-    file(CREATE_LINK "${_source_link_target}" "${_dest_path}" SYMBOLIC COPY_ON_ERROR)
-  endforeach()
-endfunction()
-
 function(_aros_publish_root_include_alias source_relative_path alias_name)
   set(_source_path "${AROS_NATIVE_INCLUDE_DIR}/${source_relative_path}")
   if(NOT EXISTS "${_source_path}")
@@ -227,28 +202,6 @@ function(_aros_publish_root_include_alias source_relative_path alias_name)
     return()
   endif()
   file(CREATE_LINK "${_source_link_target}" "${_dest_path}" SYMBOLIC COPY_ON_ERROR)
-endfunction()
-
-function(_aros_reset_root_include_aliases)
-  foreach(_source_relative_dir IN LISTS ARGN)
-    set(_source_dir "${AROS_NATIVE_INCLUDE_DIR}/${_source_relative_dir}")
-    if(NOT IS_DIRECTORY "${_source_dir}")
-      continue()
-    endif()
-
-    file(GLOB _header_files
-      RELATIVE "${_source_dir}"
-      "${_source_dir}/*.h"
-      "${_source_dir}/*.hpp"
-    )
-    foreach(_header IN LISTS _header_files)
-      get_filename_component(_header_name "${_header}" NAME)
-      set(_dest_path "${AROS_NATIVE_INCLUDE_DIR}/${_header_name}")
-      if(IS_SYMLINK "${_dest_path}")
-        file(REMOVE "${_dest_path}")
-      endif()
-    endforeach()
-  endforeach()
 endfunction()
 
 function(_aros_stage_copy_includes_mmake mmakefile_path)
@@ -483,34 +436,15 @@ foreach(_support_arch_include_mmake IN LISTS _support_arch_include_mmakefiles)
   _aros_stage_copy_includes_mmake("${_support_arch_include_mmake}")
 endforeach()
 
-# Reset previously published aliases so staged include policy changes take
-# effect when rebuilding an existing directory.
-_aros_reset_root_include_aliases("aros/posixc" "aros/stdc" "dos")
-
-# The legacy SDK publishes a mixed flat header surface: most C headers come
-# from aros/stdc first, the remaining POSIX headers fall back to aros/posixc,
-# and a few historical DOS aliases (notably <dos.h>) live at the root.
-# Recreate that root view without letting unrelated dos/* headers shadow the
-# C runtime surface.
-_aros_publish_root_include_aliases("aros/stdc")
-_aros_publish_root_include_aliases("aros/posixc")
+# Libc headers stay in their published namespaces. The compiler's ordered
+# POSIXC/STDC search paths select them; flat aliases shadow that selection.
 _aros_publish_root_include_alias("dos/dos.h" "dos.h")
-
-# The installed legacy SDK does not publish a flat <limits.h>; leaving the
-# staged stdc alias here breaks modules like workbench/libs/locale that expect
-# PATH_MAX from <aros/posixc/limits.h>.
-file(REMOVE "${AROS_NATIVE_INCLUDE_DIR}/limits.h")
-
-# The legacy SDK also does not publish these flat CRT-facing headers at the
-# include root. Keeping the staged stdc aliases here breaks compiler/crt by
-# shadowing the richer POSIXC variants needed for types like sigjmp_buf,
-# struct sigaction, and clockid_t.
-file(REMOVE
-  "${AROS_NATIVE_INCLUDE_DIR}/setjmp.h"
-  "${AROS_NATIVE_INCLUDE_DIR}/signal.h"
-  "${AROS_NATIVE_INCLUDE_DIR}/time.h"
-)
 
 _aros_generate_execbase_header()
 _aros_generate_arch_libcall_header()
 _aros_generate_arch_asm_header()
+
+# Native producers take precedence over any legacy-generated snapshot.
+if(AROS_NATIVE_GENERATED_INCLUDE_DIR)
+  _aros_copy_directory_contents("${AROS_NATIVE_GENERATED_INCLUDE_DIR}" "${AROS_NATIVE_INCLUDE_DIR}")
+endif()

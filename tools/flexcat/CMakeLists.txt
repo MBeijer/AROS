@@ -20,6 +20,8 @@ add_executable(flexcat
 )
 
 target_include_directories(flexcat PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set_target_properties(flexcat PROPERTIES
+  AROS_FLEXCAT_SOURCE_DESCRIPTION_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/sd")
 target_compile_definitions(flexcat PRIVATE _GNU_SOURCE NOERRORONWARN)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")

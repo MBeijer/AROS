@@ -1,0 +1,26 @@
+cmake_minimum_required(VERSION 3.20)
+include("${CMAKE_CURRENT_LIST_DIR}/AROSMmakeBuild.cmake")
+include("${METADATA}")
+_aros_find_toolchain_program(gcc _cc)
+_aros_find_toolchain_program(strip _strip)
+if(NOT _cc OR NOT _strip)
+  message(FATAL_ERROR "Missing kickstart compiler/strip in ${AROS_TOOLCHAIN_DIR}")
+endif()
+get_filename_component(_dir "${KICKSTART_OUTPUT}" DIRECTORY)
+file(MAKE_DIRECTORY "${_dir}")
+set(_libraries)
+foreach(_lib IN LISTS KICKSTART_LIBS)
+  list(APPEND _libraries "-l${_lib}")
+endforeach()
+execute_process(COMMAND "${_cc}" -o "${KICKSTART_OUTPUT}" ${KICKSTART_OBJECTS}
+  "-L${AROS_NATIVE_PUBLIC_LIB_DIR}" "-L${AROS_NATIVE_PRIVATE_LIB_DIR}" "-L${AROS_NATIVE_REL_LIB_DIR}"
+  ${KICKSTART_LINK_OPTIONS} ${_libraries}
+  RESULT_VARIABLE _result COMMAND_ECHO STDOUT)
+if(NOT _result EQUAL 0)
+  message(FATAL_ERROR "Kickstart link failed (${_result})")
+endif()
+execute_process(COMMAND "${_strip}" --strip-unneeded -R.comment "${KICKSTART_OUTPUT}"
+  RESULT_VARIABLE _result)
+if(NOT _result EQUAL 0)
+  message(FATAL_ERROR "Kickstart strip failed (${_result})")
+endif()

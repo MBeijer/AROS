@@ -36,6 +36,7 @@
 #include "dosboot_intern.h"
 #include "../expansion/expansion_intern.h"
 #include "menu.h"
+#include "bootdebug.h"
 
 /* Delay just like Dos/Delay(), ticks are
  * in 1/50th of a second.

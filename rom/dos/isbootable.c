@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "dos_intern.h"
+#include "../dosboot/bootdebug.h"
 
 /* Signature file, contains (for example) 'pc-i386' */
 #define AROS_BOOT_CHECKSIG ":AROS.boot"
@@ -33,6 +34,7 @@ BOOL __dos_IsBootable(struct DosLibrary * DOSBase, BPTR lock)
     fh = Open(AROS_BOOT_CHECKSIG, MODE_OLDFILE);
     if (!fh)
     {
+        D(bug("[__dos_IsBootable] Cannot open '%s', DOS error %ld\n", AROS_BOOT_CHECKSIG, IoErr()));
 #ifdef __mc68000
         /*
          * Original Amiga disks don't contain this signature. They are obviously bootable on m68k.

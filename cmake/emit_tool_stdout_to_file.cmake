@@ -20,12 +20,20 @@ endif()
 get_filename_component(_output_dir "${OUTPUT_FILE}" DIRECTORY)
 file(MAKE_DIRECTORY "${_output_dir}")
 
+set(_working_directory_args)
+if(DEFINED WORKING_DIRECTORY AND NOT WORKING_DIRECTORY STREQUAL "")
+  list(APPEND _working_directory_args WORKING_DIRECTORY "${WORKING_DIRECTORY}")
+endif()
+
 execute_process(
   COMMAND "${PROGRAM}" ${_command_args}
-  OUTPUT_FILE "${OUTPUT_FILE}"
+  ${_working_directory_args}
+  OUTPUT_FILE "${OUTPUT_FILE}.tmp"
   RESULT_VARIABLE _tool_result
 )
 
 if(NOT _tool_result EQUAL 0)
+  file(REMOVE "${OUTPUT_FILE}.tmp" "${OUTPUT_FILE}")
   message(FATAL_ERROR "Failed generating ${OUTPUT_FILE} with ${PROGRAM}")
 endif()
+file(RENAME "${OUTPUT_FILE}.tmp" "${OUTPUT_FILE}")

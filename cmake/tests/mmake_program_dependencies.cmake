@@ -1,0 +1,203 @@
+cmake_minimum_required(VERSION 3.20)
+get_filename_component(_repo "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+if(NOT TEST_BINARY_DIR)
+  message(FATAL_ERROR "Pass TEST_BINARY_DIR")
+endif()
+string(RANDOM LENGTH 10 ALPHABET abcdef0123456789 _id)
+set(_root "${TEST_BINARY_DIR}/${_id}")
+set(_src "${_root}/src")
+set(_build "${_root}/build")
+file(MAKE_DIRECTORY "${_src}/commands" "${_src}/include"
+  "${_src}/config-snapshot/bin/linux-x86_64/gen/config")
+configure_file("${CMAKE_CURRENT_LIST_DIR}/programs/CMakeLists.txt" "${_src}/CMakeLists.txt" COPYONLY)
+file(WRITE "${_src}/config-snapshot/bin/linux-x86_64/gen/config/target.cfg" [=[
+FAMILY := unix
+CPPFLAGS = $(USER_CPPFLAGS)
+EARLY_FLAGS := $(LATE_FLAGS)
+CFLAGS = $(USER_CFLAGS) $(EARLY_FLAGS) $(OPTION_FLAGS)
+LDFLAGS = $(USER_LDFLAGS)
+NOSTARTUP_LDFLAGS := -nostartfiles
+TARGET_STRIP := test-aros-strip --strip-unneeded -R.comment
+]=])
+file(MAKE_DIRECTORY "${_src}/config" "${_src}/config-snapshot/config")
+file(WRITE "${_src}/config/aros.cfg" [=[
+include $(TOP)/config/make.cfg
+include $(GENDIR)/config/compiler.cfg
+-include $(TOP)/optional.cfg
+]=])
+file(WRITE "${_src}/config-snapshot/config/make.cfg" [=[
+GENDIR := $(TOP)/bin/$(AROS_TARGET_ARCH)-$(AROS_TARGET_CPU)/gen
+AROSDIR := $(TOP)/reference/AROS
+AROS_C := $(AROSDIR)/C
+include $(GENDIR)/config/target.cfg
+]=])
+file(WRITE "${_src}/config-snapshot/bin/linux-x86_64/gen/config/compiler.cfg" [=[
+LATE_FLAGS := -Wall -Werror
+EMPTY :=
+EMPTY ?= -DWRONG_DEFAULT
+SNAPSHOT := $(strip   $(EMPTY)   )
+SNAPSHOT += $(LATER)
+RECURSIVE = $(LATER)
+RECURSIVE += $(LAST)
+LATER := -DORDERED_CONFIG
+LAST := -DAPPEND_CONFIG
+OPTION_FLAGS = $(SNAPSHOT) $(RECURSIVE) $(foreach name,LATER LAST,$(strip $($(name))))
+ifeq ($(EMPTY),)
+OPTION_FLAGS += -DCONDITIONAL_CONFIG
+else
+OPTION_FLAGS += -DWRONG_BRANCH
+endif
+UNUSED_SHELL := $(shell touch $(TOP)/must-not-execute)
+]=])
+file(WRITE "${_src}/support.c" "int support(void) { return 5; }\n")
+file(WRITE "${_src}/extra.h" "#define EXTRA_VALUE 4\n")
+file(WRITE "${_src}/runtime.txt" "native runtime version 1\n")
+file(MAKE_DIRECTORY "${_src}/runtime")
+file(WRITE "${_src}/runtime/mmakefile.src" "%build_module mmake=fixture-runtime modname=fixture\n")
+
+function(program directory mmake name prerequisites)
+  file(MAKE_DIRECTORY "${_src}/${directory}")
+  file(WRITE "${_src}/${directory}/${name}.c" "volatile int value; void _start(void) { value = 1; }\n")
+  file(WRITE "${_src}/${directory}/mmakefile.src"
+    "#MM ${mmake} : ${prerequisites}\nUSER_LDFLAGS := -nostdlib -no-pie\n%build_prog mmake=${mmake} progname=${name} files=${name} targetdir=$(AROSDIR)/C usestartup=no\n")
+endfunction()
+program(commands fixture-commands First "fixture-alias fixture-runtime")
+program(helper fixture-helper Helper "fixture-nested")
+program(nested fixture-nested Nested "")
+file(MAKE_DIRECTORY "${_src}/inactive")
+file(WRITE "${_src}/inactive/mmakefile.src"
+  "ifeq ($(AROS_TARGET_CPU),not-selected)\n%build_prog mmake=fixture-helper progname=Inactive files=missing\nendif\n")
+
+function(run)
+  execute_process(COMMAND ${ARGN} RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+  if(NOT _result EQUAL 0)
+    message(FATAL_ERROR "Command failed (${_result}): ${ARGN}\n${_out}${_err}")
+  endif()
+endfunction()
+function(build)
+  run("${CMAKE_COMMAND}" --build "${_build}" --target fixture-programs -j 2)
+endfunction()
+function(reject pattern)
+  execute_process(COMMAND "${CMAKE_COMMAND}" -S "${_src}" -B "${_build}" ${ARGN}
+    RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+  if(_result EQUAL 0 OR NOT "${_out}${_err}" MATCHES "${pattern}")
+    message(FATAL_ERROR "Expected ${pattern}: ${_result}\n${_out}${_err}")
+  endif()
+endfunction()
+run("${CMAKE_COMMAND}" -G Ninja -S "${_src}" -B "${_build}" "-DAROS_TEST_SOURCE=${_repo}")
+build()
+set(_output "${_build}/output/AROS")
+include("${_build}/programs/fixture-programs/program.cmake")
+foreach(_flag IN ITEMS -Wall -Werror -DWRONG_DEFAULT -DWRONG_BRANCH)
+  if(_flag IN_LIST MMAKE_PROGRAM_COMPILE_FLAGS)
+    message(FATAL_ERROR "Configuration snapshot/order was not preserved: ${_flag}")
+  endif()
+endforeach()
+foreach(_flag IN ITEMS -DORDERED_CONFIG -DAPPEND_CONFIG -DCONDITIONAL_CONFIG)
+  if(NOT _flag IN_LIST MMAKE_PROGRAM_COMPILE_FLAGS)
+    message(FATAL_ERROR "Recursive config/append lost ${_flag}")
+  endif()
+endforeach()
+if(EXISTS "${_src}/config-snapshot/must-not-execute")
+  message(FATAL_ERROR "Configuration shell helpers must not execute")
+endif()
+file(WRITE "${_src}/config-snapshot/optional.cfg" "OPTION_FLAGS := -DOPTIONAL_CONFIG\n")
+build()
+include("${_build}/programs/fixture-programs/program.cmake")
+if(NOT -DOPTIONAL_CONFIG IN_LIST MMAKE_PROGRAM_COMPILE_FLAGS)
+  message(FATAL_ERROR "Optional configuration addition did not reconfigure")
+endif()
+file(REMOVE "${_src}/config-snapshot/optional.cfg")
+build()
+if(EXISTS "${_output}/C/Helper" OR NOT EXISTS "${_output}/Libs/fixture.library")
+  message(FATAL_ERROR "Absent alias must not pull unrelated programs; runtime producer must build")
+endif()
+
+# A new top-level manifest augments the previously absent external alias.
+file(MAKE_DIRECTORY "${_src}/new-layer")
+set(_alias "#MM fixture-alias : fixture-helper\n")
+file(WRITE "${_src}/new-layer/mmakefile.src" "${_alias}")
+build()
+foreach(_name IN ITEMS First Helper Nested)
+  if(NOT EXISTS "${_output}/C/${_name}")
+    message(FATAL_ERROR "Missing discovered program ${_name}")
+  endif()
+endforeach()
+run("${CMAKE_COMMAND}" --build "${_build}" --target aros-programs-fixture-helper-native)
+file(TIMESTAMP "${_output}/C/First" _first "%s")
+file(TIMESTAMP "${_output}/C/Nested" _nested "%s")
+run("${CMAKE_COMMAND}" -E sleep 1)
+file(APPEND "${_src}/nested/Nested.c" "int added = 9;\n")
+file(WRITE "${_src}/runtime.txt" "native runtime version 2\n")
+build()
+file(TIMESTAMP "${_output}/C/First" _after_first "%s")
+file(TIMESTAMP "${_output}/C/Nested" _after_nested "%s")
+file(READ "${_output}/Libs/fixture.library" _runtime)
+if(NOT _first STREQUAL _after_first OR _nested STREQUAL _after_nested
+   OR NOT _runtime STREQUAL "native runtime version 2\n")
+  message(FATAL_ERROR "Runtime/program dependencies must rebuild without relinking their consumer")
+endif()
+file(REMOVE "${_output}/C/Helper" "${_output}/Libs/fixture.library")
+build()
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${_build}" --target fixture-programs
+  RESULT_VARIABLE _result OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+if(NOT _result EQUAL 0 OR NOT _out MATCHES "no work to do" OR _out MATCHES "Re-running CMake")
+  message(FATAL_ERROR "Expected ordinary no-op build: ${_out}${_err}")
+endif()
+
+program(extra-programs fixture-helper Additional "")
+build()
+if(NOT EXISTS "${_output}/C/Additional")
+  message(FATAL_ERROR "Shared mmake name did not discover its additional manifest producer")
+endif()
+program(extra-programs fixture-helper Helper "")
+reject("Duplicate program output")
+program(extra-programs fixture-helper Additional "")
+
+file(WRITE "${_src}/new-layer/mmakefile.src"
+  "ifeq ($(AROS_TARGET_CPU),not-selected)\n#MM fixture-alias : fixture-unsupported\n%unknown mmake=fixture-unsupported\nendif\n${_alias}")
+build()
+file(WRITE "${_src}/new-layer/mmakefile.src" "#MM fixture-alias : fixture-cycle\n#MM fixture-cycle : fixture-alias\n")
+reject("metadata dependency cycle")
+file(WRITE "${_src}/new-layer/mmakefile.src" "#MM\nfixture-alias :\n\t@echo unsupported\n")
+reject("Unsupported static prerequisite recipe")
+file(WRITE "${_src}/new-layer/mmakefile.src" "#MM fixture-alias : fixture-unsupported\n%unknown mmake=fixture-unsupported\n")
+reject("needs native support for %unknown")
+file(WRITE "${_src}/new-layer/mmakefile.src" "${_alias}")
+# A stale runtime file is not a registered module producer.
+reject("needs native support for %build_module" -DAROS_TEST_NO_RUNTIME_PRODUCER=ON)
+run("${CMAKE_COMMAND}" -S "${_src}" -B "${_build}" -DAROS_TEST_NO_RUNTIME_PRODUCER=OFF)
+program(nested fixture-nested Nested "fixture-commands")
+reject("strongly connected component")
+program(nested fixture-nested Nested "")
+file(WRITE "${_src}/commands/SameFile.c" "void _start(void) {}\n")
+program(commands fixture-commands First "fixture-same-file")
+file(APPEND "${_src}/commands/mmakefile.src"
+  "#MM fixture-same-file : fixture-runtime\n%build_prog mmake=fixture-same-file progname=SameFile files=SameFile targetdir=$(AROSDIR)/C usestartup=no\n")
+run("${CMAKE_COMMAND}" -S "${_src}" -B "${_build}")
+build()
+if(NOT EXISTS "${_output}/C/SameFile")
+  message(FATAL_ERROR "Local program metadata was mistaken for a recipe-less alias")
+endif()
+program(commands fixture-commands First "local-a")
+file(APPEND "${_src}/commands/mmakefile.src" "#MM local-a : local-b\n#MM local-b : local-a\n")
+reject("metadata dependency cycle")
+program(commands fixture-commands First "fixture-alias fixture-runtime")
+file(WRITE "${_src}/config-snapshot/optional.cfg" "include $(TOP)/optional.cfg\n")
+reject("Recursive configuration include")
+file(WRITE "${_src}/config-snapshot/optional.cfg" "include $(TOP)/missing-required.cfg\n")
+reject("Missing configuration include")
+file(WRITE "${_src}/config-snapshot/optional.cfg" "CFLAGS += $(UNUSED_SHELL)\n")
+reject("Unresolved program COMPILE_FLAGS")
+file(WRITE "${_src}/config-snapshot/optional.cfg" "ifeq ($(unsupported expression),)\nCFLAGS += -DWRONG_BRANCH\nendif\n")
+reject("Unresolved configuration condition")
+file(REMOVE "${_src}/config-snapshot/optional.cfg")
+file(REMOVE "${_src}/new-layer/mmakefile.src")
+run("${CMAKE_COMMAND}" -S "${_src}" -B "${_build}")
+build()
+execute_process(COMMAND "${CMAKE_COMMAND}" --build "${_build}" --target aros-programs-fixture-helper-native
+  RESULT_VARIABLE _result OUTPUT_QUIET ERROR_QUIET)
+if(_result EQUAL 0)
+  message(FATAL_ERROR "Removed alias left its program producer registered")
+endif()
+message(STATUS "Program/runtime prerequisite graph checks passed")

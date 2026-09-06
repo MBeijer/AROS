@@ -7,6 +7,8 @@ if(NOT DEFINED AROS_CONFIG_BUILD_DIR
   message(FATAL_ERROR "Missing required static archive parameters")
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/AROSNativeConfig.cmake")
+
 function(_aros_decode_list input_value out_var)
   if("${input_value}" STREQUAL "")
     set(${out_var} "" PARENT_SCOPE)
@@ -27,6 +29,12 @@ function(_aros_unwrap_strip_expression input_value out_var)
 endfunction()
 
 function(_aros_read_config_tokens variable_name out_var)
+  _aros_native_config_value("${variable_name}" _value _found)
+  if(_found)
+    separate_arguments(_tokens NATIVE_COMMAND "${_value}")
+    set(${out_var} "${_tokens}" PARENT_SCOPE)
+    return()
+  endif()
   set(_config_files
     "${AROS_CONFIG_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/target.cfg"
     "${AROS_CONFIG_BUILD_DIR}/bin/${AROS_TARGET}/gen/config/compiler.cfg"

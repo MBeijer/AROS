@@ -23,6 +23,7 @@
 
 #include "dos_intern.h"
 #include "../dosboot/bootflags.h"
+#include "../dosboot/bootdebug.h"
 
 extern char *generate_banner(void);
 

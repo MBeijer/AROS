@@ -9,6 +9,12 @@ if(NOT DEFINED AROS_SOURCE_DIR
   message(FATAL_ERROR "Missing required generic mmake include staging parameters")
 endif()
 
+# Transitional callers can stage the same headers from multiple linklibs.
+# Keep their copies atomic with respect to each other until all use native
+# shared copy producers instead of this manifest-wide stager.
+file(MAKE_DIRECTORY "${AROS_BINARY_DIR}")
+file(LOCK "${AROS_BINARY_DIR}/.mmake-includes.lock" GUARD PROCESS TIMEOUT 120)
+
 function(_aros_read_mmake_logical_lines file_path out_var)
   file(STRINGS "${file_path}" _raw_lines)
   set(_logical_lines)

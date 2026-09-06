@@ -37,8 +37,12 @@ if(COMMAND aros_register_mmake_linklib AND DEFINED AROS_LEGACY_BUILD_DIR AND DEF
     aros-arch-udis86-linklib-native
     MODULE_PATH "arch/all-pc/udis86"
     LIBNAME "udis86"
+    # Retain the existing itab.h adapter until generated-header rules migrate.
+    LEGACY_GENERATED_HEADERS
     DEPENDS
       aros-arch-udis86-genfiles-native
+      "${_aros_udis86_gen_itab_c}"
+      "${_aros_udis86_gen_itab_h}"
   )
 
   if(TARGET aros-arch-linklibs-native)
